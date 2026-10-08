@@ -26,10 +26,20 @@ proposals:
   - '2610.00246'
   - '2609.28213'
   - '2609.27391'
+  - '2610.09081'
+  - '2610.08788'
+  - '2610.08266'
+  - '2610.07440'
+  - '2610.07165'
+  - '2610.07158'
+  - '2610.07146'
+  - '2610.06417'
+  - '2610.06371'
+  - '2610.05905'
   first_seen: '2026-10-02'
-  occurrences: 1
+  occurrences: 2
   status: pending
-  note: 11 papers were tagged 'design_tools' with low confidence this run, which means the
+  note: 13 papers were tagged 'design_tools' with low confidence this run, which means the
     tag was a guess rather than a match on a listed signal.
   target: design_tools
 - id: industry-gap-shortlisted
@@ -48,8 +58,18 @@ proposals:
   - '2610.01693'
   - '2610.01600'
   - '2610.01594'
+  - '2610.10531'
+  - '2610.10523'
+  - '2610.10490'
+  - '2610.10454'
+  - '2610.10427'
+  - '2610.10412'
+  - '2610.10351'
+  - '2610.10298'
+  - '2610.10268'
+  - '2610.10165'
   first_seen: '2026-10-02'
-  occurrences: 1
+  occurrences: 2
   status: pending
-  note: '319 shortlisted paper(s) were dropped rather than forced into a weak industry fit.
+  note: '233 shortlisted paper(s) were dropped rather than forced into a weak industry fit.
     Pipelines involved: unknown'
