@@ -1,0 +1,55 @@
+# Improvement proposals carried between runs, written by scout/improve.py.
+#
+# `new_discovery_signal` proposals are applied automatically once they reach
+# 3 occurrences; everything else is escalated in the report for a
+# human decision and never applied on its own.
+#
+# `occurrences` counts separate WEEKS, not papers, and it is what drives the
+# automatic behaviour -- safe to edit by hand, but do not inflate it.
+proposals:
+- id: signal-design-tools
+  type: new_discovery_signal
+  proposal: 'Add a discovery signal to pipeline ''design_tools'' covering: One-way SPIR protocol
+    exploiting NISQ device memory constraints—quantum information processing with noisy hardware;
+    Sequential response capacity and information theory bounds for quantum processes—theoretical
+    characterization without direct hardware application; Stark shift measurements and spectroscopic
+    characterization of hydrogenic ions using eight-component relativistic theory—atomic spectroscopy
+    technique'
+  evidence:
+  - '2610.02068'
+  - '2610.01979'
+  - '2610.00712'
+  - '2610.00527'
+  - '2609.38836'
+  - '2609.33116'
+  - '2609.29030'
+  - '2610.00246'
+  - '2609.28213'
+  - '2609.27391'
+  first_seen: '2026-10-02'
+  occurrences: 1
+  status: pending
+  note: 11 papers were tagged 'design_tools' with low confidence this run, which means the
+    tag was a guess rather than a match on a listed signal.
+  target: design_tools
+- id: industry-gap-shortlisted
+  type: new_industry
+  proposal: 'Add an industry (or widen an existing description) covering the shortlisted papers
+    listed in evidence: they scored well on readiness but no industry in the taxonomy fitted
+    them.'
+  evidence:
+  - '2610.02167'
+  - '2610.02075'
+  - '2610.02068'
+  - '2610.02013'
+  - '2610.01979'
+  - '2610.01860'
+  - '2610.01714'
+  - '2610.01693'
+  - '2610.01600'
+  - '2610.01594'
+  first_seen: '2026-10-02'
+  occurrences: 1
+  status: pending
+  note: '319 shortlisted paper(s) were dropped rather than forced into a weak industry fit.
+    Pipelines involved: unknown'

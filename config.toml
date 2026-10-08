@@ -1,0 +1,291 @@
+# quantph-scout configuration (v2).
+# Secrets do NOT belong here -- put them in .env (see .env.example).
+
+[arxiv]
+# Fallback only. The real scope lives in industries.yaml under `arxiv:`, so the
+# query and the taxonomy cannot drift apart. See that file for measured per-
+# subcategory volumes and why each one is in or out.
+categories = ["quant-ph"]
+# v2 wants the last 7 days of new submissions. v1 used 14 days so that a paper
+# announced late still got picked up by the next run; a 7-day window loses that
+# overlap, so `lookback_days` below re-establishes it without re-paying for
+# anything -- see the comment there.
+window_days = 7
+# Fetch this many days further back than window_days, and rely on DB dedupe to
+# discard what has already been seen. This is what replaces v1's 14-day overlap:
+# arXiv announces on a delay, so a paper submitted just before last week's run
+# may only have become fetchable afterwards. Without this, such a paper is
+# silently dropped forever. Costs nothing -- dedupe removes it before triage.
+lookback_days = 7
+# Exclude replacements and revised versions: keep only v1 submissions.
+# Note this is close to a no-op in practice (4.5% of the measured corpus),
+# because arXiv's submittedDate filter already keys on original submission.
+new_submissions_only = true
+# arXiv asks for >= 3s between API requests. Do not lower this.
+delay_seconds = 3.0
+# Per-request timeout in seconds. The arxiv package sets none of its own, so
+# without this a hung connection blocks the run forever -- and because the run
+# holds an exclusive flock, it would block every later week too. Observed: a
+# fetch sat for 25 minutes with no progress and no error after a DNS blip.
+request_timeout = 60.0
+page_size = 100
+# Safety ceiling on results per run. The 9-category allowlist measured 955
+# papers in 7 days; the lookback doubles the query's reach.
+max_results = 6000
+# arXiv returns 429 if you have been too eager. The arxiv package's own retries
+# only ever wait delay_seconds apart, which is far too short for a rate limit, so
+# the whole search is retried with real backoff: 60s, 120s, 240s.
+max_attempts = 4
+backoff_seconds = 60.0
+
+[run]
+# A stage that fails more than this fraction of its papers makes the whole run
+# fail (nonzero exit, status='failed'). 0.5 means "half the papers may fail".
+# Without this, an expired API key would look like a quiet week.
+max_failure_rate = 0.5
+
+[models]
+# Stage A and Stage B run over the whole corpus, so both are cheap-tier.
+tag = "claude-haiku-4-5-20251001"
+readiness = "claude-haiku-4-5-20251001"
+# Industry matching now sees only the ~20-paper readiness shortlist, so it could
+# afford a stronger model. Kept cheap because the pipeline tag has already
+# narrowed the industry candidates to a handful.
+match = "claude-haiku-4-5-20251001"
+# The final pass reads abstracts only, not full text, which is the single
+# biggest saving in v2 over v1.
+final = "claude-sonnet-5"
+# Independent verification of the selected papers' quoted numbers. Same tier as
+# the final pass on purpose: a weaker checker is not a check.
+verify = "claude-sonnet-5"
+
+# ---------------------------------------------------------------------------
+# Engagement / quality pre-filter. Free: runs on title+abstract+metadata only,
+# before any model call.
+#
+# Measured against run 1's 998 LLM-labelled papers. "recall" below is the share
+# of papers v1's triage scored top marks that the proxy keeps:
+#
+#   proxy                         keeps    recall
+#   journal_ref (accepted/pub)      2.2%      3.3%   <- rejected, see below
+#   experimental phrases           27.2%     78.9%
+#   relevant cross-list            27.3%     73.7%
+#   phrases OR cross-list          42.9%     84.2%   <- the default
+#   phrases AND cross-list         11.5%     68.4%
+# ---------------------------------------------------------------------------
+[prefilter]
+# false disables every proxy below and keeps all papers, still logging what each
+# one WOULD have dropped. Use this to re-measure after changing the taxonomy.
+enabled = true
+# How the enabled proxies combine. "any" (a paper survives if any proxy likes
+# it) is the measured sweet spot; "all" drops a third of the good papers.
+combine = "any"
+
+# A journal reference exists, or the comment says accepted/published.
+# OFF BY DEFAULT and this is deliberate: measured recall is 3.3%. As a gate it
+# would discard 119 of 123 genuinely good papers, because week-old preprints are
+# not yet published anywhere. Adding it to the "any" set above changed recall by
+# exactly zero. It is kept as a switch only so the measurement is reproducible.
+journal_ref = false
+
+# Abstract contains language indicating measurement on real hardware. Pure
+# theory is out of scope unless it proposes a concrete device -- which the triage
+# model, not this regex, is responsible for noticing.
+experimental_phrases = true
+phrases = ["we demonstrate", "we measure", "we report", "we observe",
+           "fabricat", "experimentally", "measured", "device"]
+
+# Cross-listed into at least one allowlisted non-primary category. Categories
+# come from industries.yaml, so this needs no list of its own.
+relevant_cross_list = true
+
+# ---------------------------------------------------------------------------
+# Stage A: pipeline tagging. Every paper is tagged with the route by which its
+# result could reach a product, before any industry is chosen. Drops foundational
+# work cheaply and narrows the industry candidates from 78 to a handful.
+# ---------------------------------------------------------------------------
+[tag]
+papers_per_request = 20
+concurrency = 4
+max_tokens = 3072
+
+# ---------------------------------------------------------------------------
+# Stage B: readiness scoring. Five checks from pipelines.yaml, 0-2 each, out of
+# 10. This is both the shortlist filter AND what the report is ordered by.
+#
+# Two documented deviations, see prompts/readiness.md:
+#  * operating_conditions is judged against the PIPELINE'S INCUMBENT, not against
+#    room temperature absolutely. Scored literally, every superconducting and
+#    quantum paper scores 0 by definition and can never rank -- which would
+#    silently delete hts_tape, lts_wire and superconducting_electronics from
+#    every report.
+#  * "not stated" scores 1, per the brief. That makes reproducibility nearly
+#    constant for preprints; the run logs a per-check mean so you can see when a
+#    check has gone inert.
+# ---------------------------------------------------------------------------
+[readiness]
+papers_per_request = 15
+concurrency = 4
+max_tokens = 8192
+# How many papers reach industry matching.
+shortlist_size = 20
+
+# ---------------------------------------------------------------------------
+# Industry matching (was `triage` before the pipeline layer). Runs on the
+# readiness shortlist only, so it answers "which industry" rather than acting as
+# the volume filter.
+# ---------------------------------------------------------------------------
+[match]
+papers_per_request = 20
+concurrency = 2
+max_tokens = 2048
+# Below this relevance the paper is DROPPED rather than forced into a weak fit.
+min_relevance = 2
+# If narrowing by pipeline leaves fewer candidates than this, offer the full
+# eligible list instead: a thin overlap means the pipeline vocabulary did not
+# describe that corner of the taxonomy, not that only two industries fit.
+min_candidates = 6
+
+# Prompt caching is NOT used, and that is measured rather than an omission.
+# Haiku 4.5's minimum cacheable prefix is 4,096 tokens; the static block here
+# measured ~2,700. Below the minimum a cache_control marker silently never
+# caches -- no error, no saving. Batching already amortises the prefix 20x.
+# If you enable it, confirm `cache_read_input_tokens` in model_calls is nonzero.
+use_prompt_caching = false
+
+# ---------------------------------------------------------------------------
+# Part 2: the self-improvement pass. Runs at the end of every run, reads only
+# this run's own output plus state/feedback.yaml, and makes NO model calls -- so
+# it is free and cannot fail in a way that costs money.
+#
+# Only `new_discovery_signal` proposals are ever applied automatically, and only
+# after `threshold` separate weeks. New pipelines, new or retired industries,
+# scoring changes and prompt changes are escalated in the report for a human.
+# A system that rewrites its own scoring rules cannot be audited from a diff.
+# ---------------------------------------------------------------------------
+[improve]
+enabled = true
+proposals_file = "state/proposals.yaml"
+feedback_file = "state/feedback.yaml"
+pipelines_file = "pipelines.yaml"
+# Occurrences count separate WEEKS, not papers, so one unusual week cannot trip
+# the auto-apply threshold on its own.
+threshold = 3
+max_cost_share = 0.05
+
+[final]
+# Stronger model over the shortlist only. Abstracts only.
+concurrency = 3
+max_tokens = 8000
+effort = "medium"
+# Hard ceiling on the shortlist. Raised from 30 to 60 after the coverage audit
+# widened the taxonomy from 32 to 39 eligible industries, which raises the
+# shortlist rate: selection should pick its 10 from a real pool, not from an
+# arbitrary truncation. Costs ~$0.45/run more at the cap.
+#
+# Note the shortlist is ORDERED BY KEYWORD-EVIDENCE STRENGTH before this bites
+# (see pipeline.py). That matters because every shortlisted paper scored exactly
+# relevance == 3, so without that ordering the cut would fall in arXiv-ID order.
+max_papers = 60
+# Pull full text for a single paper only when the model says its abstract is too
+# vague to explain the finding. Off means the paper is reported from the
+# abstract regardless.
+allow_fulltext_fallback = true
+max_fulltext_chars = 120000
+
+[verify]
+# Independent second pass over the SELECTED papers only, checking that every
+# number in the report prose actually appears in the source. This is v2's
+# replacement for v1's critic, which measurably took claims away (it downgraded
+# confidence and removed applications). Scoped to the final 10 rather than the
+# whole shortlist, which is what makes it affordable: ~$0.19/run.
+enabled = true
+concurrency = 3
+max_tokens = 4000
+effort = "medium"
+
+[select]
+# Greedy selection over (paper, industry) pairs, ranked by relevance then
+# disruption. No industry may appear twice. Fewer than max_papers is a valid
+# outcome -- if only 4 pairs qualify, the report has 4 entries.
+max_papers = 10
+
+[digest]
+# Machine-readable sibling of the Markdown digest, for tracking trends across
+# weeks. Written next to the .md as digests/YYYY-MM-DD.json.
+write_json = true
+
+# ---------------------------------------------------------------------------
+# Budget guard. Cost is projected after the free pre-filter, before any model
+# call. If the projection exceeds hard_cap_usd, the triage input is trimmed to
+# the highest keyword-scoring papers until the projection fits, and exactly what
+# was trimmed is recorded in the run row and the digest.
+# ---------------------------------------------------------------------------
+[budget]
+target_usd = 3.50
+hard_cap_usd = 5.00
+# Per-paper token estimates used for the projection. Recalibrated from run 8's
+# measured model_calls rather than guessed -- re-derive them the same way if
+# actual cost ever drifts from projected (see the README).
+#
+# Note the triage prefix measured ~2,700 tokens, not the ~1,300 first estimated.
+# That is still below Haiku 4.5's 4,096-token minimum cacheable prefix, so the
+# decision not to use prompt caching is unchanged -- but it is closer than it
+# looked, so re-check it if the industry list grows a lot.
+est_tokens_per_paper = 340
+# Stage A: measured from run 17 -- the pipeline list plus instructions.
+est_tag_prefix_tokens = 2500
+est_tag_output_per_paper = 55
+# Stage B: measured from run 17. The largest per-paper output in the run, and
+# the stage that now dominates cost at volume.
+est_readiness_prefix_tokens = 2700
+est_readiness_output_per_paper = 190
+# Industry matching -- runs on every tagged paper, so it scales with volume.
+est_triage_prefix_tokens = 2700
+est_triage_output_per_paper = 48
+# Share of tagged papers that get an industry and so reach readiness scoring.
+# Measured at ~0.31 on run 18; 0.4 leaves headroom in the pessimistic direction.
+est_match_survival_share = 0.4
+# Final + verify are bounded by their own caps, not by volume, so they are
+# projected at those caps -- the pessimistic case, which is what a guard wants.
+# Output here ran well under estimate at effort = "medium"; the headroom is kept
+# deliberately, because a paper that pulls full text costs far more on input.
+est_final_input_per_paper = 3600
+est_final_output_per_paper = 800
+est_verify_input_per_paper = 2900
+est_verify_output_per_paper = 1100
+
+[industry]
+# Industry taxonomy from industries.yaml: the arXiv category allowlist and the
+# keyword pre-filter. Set enabled = false for plain quant-ph behaviour with no
+# industry matching at all.
+enabled = true
+taxonomy_file = "industries.yaml"
+# Keywords firing on at least this share of papers are reported as trim candidates.
+noise_share = 0.01
+
+[retry]
+max_attempts = 4
+base_delay = 2.0
+max_delay = 45.0
+
+# USD per million tokens. Verified 2026-09-30 against
+# platform.claude.com/docs/en/about-claude/pricing -- update if pricing changes.
+# Batch-API rates are half these, but v2 uses the synchronous API.
+[pricing."claude-haiku-4-5-20251001"]
+input = 1.0
+output = 5.0
+
+[pricing."claude-sonnet-5"]
+input = 2.0
+output = 10.0
+
+[fulltext]
+# Seconds to wait for arxiv.org HTML/PDF.
+timeout = 60
+user_agent = "quantph-scout/0.1 (personal research digest; +https://arxiv.org)"
+
+[logging]
+level = "INFO"
+max_bytes = 5000000
+backup_count = 5

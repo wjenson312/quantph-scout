@@ -1,0 +1,487 @@
+# industries.yaml — industry taxonomy for the arXiv agent
+#
+# Source list: non-mainstream industries where China leads the US in production
+# share, processing capacity, cost, or deployed scale. Compiled Sept 2026 from
+# general knowledge. Shares are UNVERIFIED — treat this as a strategic label,
+# not a citable figure. 108 industries, 78 of them eligible matches.
+#
+# SCOPE CHANGED 2026-09-30: this file used to describe "quantum technology ->
+# industry". It now describes "experimental physical science -> industry". The
+# quantum framing was silently excluding work that plainly matters here —
+# perovskite solar cells, core-loss measurements on electrical steel, phonon
+# transport in thermoelectrics, catalysts, electrolyser degradation. Three things
+# changed together, and they only work together:
+#   1. the secondary-category gate now asks "is there a measurement" rather than
+#      "is this quantum" (see keyword_sets.experimental_evidence);
+#   2. the tier definitions below no longer mention quantum;
+#   3. eleven industries defined in purely quantum terms were redefined by what
+#      they actually produce — `polysilicon` means solar and semiconductor
+#      feedstock, not isotopically enriched qubit substrates.
+# Changing the gate alone does nothing: papers reach triage and then score 0
+# because no industry's DESCRIPTION covers them.
+#
+# Tiers
+#   1 = match   : the materials/devices/processes studied ARE this industry's
+#                 product or feedstock
+#   2 = match   : the paper measures, monitors or improves this industry's
+#                 process, product or infrastructure
+#   3 = INERT   : not an eligible match and never sent to a model. 30 entries
+#                 remain here — food, pharmaceutical formulation, agrochemicals
+#                 and assembly-only manufacturing — because no physical-science
+#                 paper is expected to bear on them. 38 former tier-3 entries
+#                 were promoted on 2026-09-30 once the premise widened.
+#
+# Matching rules (implemented by the agent, not by this file)
+#   - case-insensitive, word-boundary match on title + abstract
+#   - an industry's effective keywords = its keywords + all keywords in its
+#     keyword_sets + its group's keyword_sets
+#   - a hit on a group-level keyword_set with no industry-specific hit tags
+#     the GROUP (e.g. "critical minerals") rather than every member
+
+version: 1
+
+# Tier definitions, sent verbatim to the scoring model. Kept here rather than in
+# the prompt so this file stays the single source of truth.
+tiers:
+  1: "The materials, devices, or fabrication steps studied in the paper are what this industry produces or refines."
+  2: "The paper measures, monitors, or improves this industry's process, product, or deployed infrastructure."
+  3: "Not an eligible match. Retained but inert -- no physical-science paper is expected to bear on these (food, pharmaceutical formulation, agrochemicals, assembly-only manufacturing)."
+
+arxiv:
+  primary: [quant-ph]
+  # Allowlisted cond-mat and physics subcategories. cond-mat and physics are far
+  # too large to take whole, and most of each is irrelevant here, so the scope is
+  # an explicit allowlist rather than an archive with exclusions.
+  #
+  # Measured 7-day submission volume (2026-09-15 -> 2026-09-22), and the papers
+  # each category uniquely adds to the deduped union:
+  #
+  #   quant-ph             467   (+372 unique)
+  #   cond-mat.mtrl-sci    205   (+129)
+  #   physics.optics       119   ( +79)
+  #   cond-mat.str-el      109   ( +46)
+  #   cond-mat.mes-hall    105   ( +39)
+  #   physics.ins-det       37   ( +27)
+  #   physics.app-ph        55   ( +23)
+  #   physics.atom-ph       39   ( +21)
+  #   cond-mat.supr-con     52   ( +20)
+  #   ---------------------------------------
+  #   deduped union        955 papers/week
+  #
+  # Deliberately excluded as theory-heavy or off-topic, with their volume, to
+  # record that the choice was measured rather than assumed:
+  #   cond-mat.stat-mech 139, physics.chem-ph 73, cond-mat.soft 57,
+  #   physics.plasm-ph 48, cond-mat.dis-nn 32, cond-mat.quant-gas 30,
+  #   cond-mat.other 23, physics.acc-ph 16, physics.hist-ph 8
+  secondary: [cond-mat.mtrl-sci, cond-mat.supr-con, cond-mat.mes-hall,
+              cond-mat.str-el, physics.app-ph, physics.optics,
+              physics.ins-det, physics.atom-ph]
+  # Papers from secondary categories are kept only if title/abstract also hits at
+  # least one term in this keyword set. See `experimental_evidence` below for why
+  # this is no longer `quantum_core`.
+  #
+  # NOTE: widening this gate does NOT retroactively reconsider papers it already
+  # rejected -- they are stored with gate_passed = 0 so dedupe skips them forever.
+  # After changing it, run:  DELETE FROM papers WHERE gate_passed = 0;
+  secondary_requires: experimental_evidence
+
+domains: [manufacturing, aerospace, quantum_hardware]
+
+# Keywords matched case-sensitively, overriding the default case-insensitive rule.
+# These are chemical formulae that collide with ordinary English words once
+# lowercased. Empty this list to restore fully case-insensitive matching.
+#   GaP -> "gap"  (band gap, energy gap, spectral gap: fired on 7.8% of papers)
+#   TiN -> "tin"
+#   TES -> "tes"
+case_sensitive: [GaP, TiN, TES]
+
+# Phrases in which a keyword should NOT count as a hit. Word-boundary matching
+# cannot tell "roller bearing" from "bearing in mind"; this can.
+exclusions:
+  bearing:
+    ["bearing in mind", "bearings in mind", "bearing on", "bearing this in mind"]
+
+keyword_sets:
+  quantum_core:
+    [qubit, quantum, entanglement, entangled, NV center, nitrogen-vacancy,
+     atom interferometer, atom interferometry, squeezed light, single-photon,
+     superconducting, spin qubit, optically pumped magnetometer, Rydberg,
+     cold atoms, trapped ion, quantum dot, color center]
+  # The gate on secondary-category papers. Replaced `quantum_core` in that role on
+  # 2026-09-30: requiring a quantum mention discarded 75% of cond-mat/physics
+  # papers, including perovskite solar cells, core-loss measurements on electrical
+  # steel, phonon transport in thermoelectric clathrates and fibre-optic pulse
+  # propagation -- all squarely relevant to industries in this file. The gate now
+  # asks "is there a real measurement here" instead of "is this quantum".
+  #
+  # Measured on 878 secondary-only papers: quantum_core kept 25%, this keeps 42%.
+  experimental_evidence:
+    [we demonstrate, we measure, we report, we observe, we present, we show,
+     we fabricate, fabricated, fabrication, experimentally, measured, measurement,
+     characterized, characterised, synthesized, synthesised, deposited, grown,
+     annealed, device, sample, prototype, testbed, observed, prepared,
+     we achieve, we obtain, we find]
+  superconducting_materials:
+    [critical current, critical current density, Jc, upper critical field, Hc2,
+     irreversibility field, flux pinning, superconducting tape, coated conductor,
+     REBCO, YBCO, BSCCO, Nb3Sn, NbTi, niobium titanium, niobium tin,
+     superconducting wire, superconducting magnet, transition temperature, Tc,
+     Meissner, high-temperature superconductor, thin film superconductor]
+  mineral_exploration:
+    [quantum gravimeter, gravity gradiometer, gravity gradiometry,
+     mineral exploration, geophysical survey, airborne magnetometry,
+     ore body, magnetic anomaly]
+  subsurface:
+    [quantum gravimeter, gravity gradiometry, subsurface void,
+     underground mapping, tunnel detection, near-surface geophysics]
+  grid_sensing:
+    [diamond magnetometer, NV current sensor, current sensing, power grid,
+     transformer, electrical steel, magnetic domain imaging, busbar,
+     fault detection, high-voltage]
+  battery_sensing:
+    [quantum diamond microscope, NV magnetometry, lithium plating,
+     operando, battery, magnetic susceptibility imaging, cathode, anode,
+     electrolyte, lithium-ion]
+  ndt:
+    [non-destructive testing, nondestructive testing, NDT, NDE,
+     atomic magnetometer, optically pumped magnetometer, eddy current,
+     crack detection, weld inspection, defect imaging, corrosion detection]
+  inertial:
+    [quantum inertial sensor, atom interferometer gyroscope,
+     quantum accelerometer, quantum gyroscope, cold-atom navigation,
+     inertial navigation, PNT, GNSS-denied]
+
+groups:
+  critical_minerals:  {name: "Critical minerals & processing", keyword_sets: [mineral_exploration]}
+  chemicals:          {name: "Specialty & bulk chemicals"}
+  pharma_medical:     {name: "Pharmaceutical & medical inputs"}
+  power_grid:         {name: "Power & grid hardware", keyword_sets: [grid_sensing]}
+  battery_chain:      {name: "Battery supply chain", keyword_sets: [battery_sensing]}
+  industrial:         {name: "Industrial components & machinery", keyword_sets: [ndt]}
+  electronics:        {name: "Electronics components"}
+  heavy_materials:    {name: "Heavy materials & construction"}
+  food_textiles:      {name: "Food, textiles & other"}
+
+industries:
+
+  # ---------------- Tier 1: direct quantum-hardware linkage ----------------
+  - id: rare_earth_refining
+    name: Rare earth separation & refining
+    group: critical_minerals
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [rare-earth ion, rare-earth doped, erbium, europium, ytterbium,
+               praseodymium, neodymium, Er:YSO, Eu:YSO, quantum memory]
+    link: "Rare-earth separation for magnets, phosphors, lasers and optical amplifiers"
+
+  - id: ndfeb_magnets
+    name: Sintered NdFeB permanent magnets
+    group: critical_minerals
+    tier: 1
+    domains: [quantum_hardware, aerospace]
+    keywords: [NdFeB, permanent magnet, Halbach, magnetic trap, Zeeman slower,
+               atom chip, bias field]
+    link: "Permanent-magnet field sources in atom/ion trap and sensor hardware"
+
+  - id: gallium
+    name: Gallium refining
+    group: critical_minerals
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [GaAs, gallium arsenide, GaN, gallium nitride, GaP, InGaAs,
+               AlGaAs, III-V]
+    link: "GaAs and GaN for power electronics, RF, LEDs, lasers and photonic devices"
+
+  - id: germanium
+    name: Germanium refining
+    group: critical_minerals
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [germanium, SiGe, Ge/SiGe, hole spin qubit, Ge quantum well,
+               germanium detector]
+    link: "Germanium for infrared optics, SiGe electronics and fibre-optic components"
+
+  - id: indium
+    name: Indium refining
+    group: critical_minerals
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [InAs, InSb, InP, indium phosphide, indium arsenide, nanowire,
+               Majorana, topological superconductor, indium bump]
+    link: "Indium for ITO display coatings, InP photonics, infrared detectors and solders"
+
+  - id: high_purity_arsenic
+    name: High-purity arsenic (for GaAs)
+    group: critical_minerals
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [arsenide, molecular beam epitaxy, MBE-grown]
+    link: "High-purity arsenic feedstock for GaAs wafers and compound semiconductors"
+
+  - id: bismuth
+    name: Bismuth refining
+    group: critical_minerals
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [Bi2Se3, Bi2Te3, bismuth selenide, bismuth telluride,
+               topological insulator, bismuth]
+    link: "Bismuth chalcogenide topological insulators"
+
+  - id: tungsten
+    name: Tungsten mining & processing
+    group: critical_minerals
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [transition-edge sensor, TES, tungsten, superconducting detector]
+    link: "Tungsten transition-edge sensors and superconducting detectors"
+
+  - id: polysilicon
+    name: Polysilicon
+    group: critical_minerals
+    tier: 1
+    domains: [quantum_hardware, manufacturing]
+    keywords: [silicon-28, 28Si, isotopically enriched silicon, silicon spin qubit,
+               donor qubit, phosphorus donor]
+    link: "Polysilicon feedstock for solar wafers and semiconductor-grade silicon"
+
+  - id: optical_fiber
+    name: Optical fiber & preforms
+    group: electronics
+    tier: 1
+    domains: [quantum_hardware, aerospace]
+    keywords: [quantum key distribution, QKD, hollow-core fiber, quantum network,
+               quantum repeater, entanglement distribution, fiber link]
+    link: "Optical fibre, preforms and the loss, dispersion and amplification that limit them"
+
+  # ---------------------------------------------------------------------------
+  # Added 2026-09-30 after a measured coverage audit. On run 8, 27 experimental
+  # papers passed every filter and were then discarded because no industry fitted
+  # them -- against only 3 that got through. The clearest symptom was the triage
+  # model shoehorning: a V-Ti superconducting wire paper filed under `tungsten`,
+  # a rhenium superconductor under `rare_earth_refining`, a visible laser under
+  # `led_gan`. Each entry below is a pipeline those papers actually belonged to.
+  #
+  # All seven keep the file's premise: China leads on production share,
+  # processing capacity, or deployed scale.
+  # ---------------------------------------------------------------------------
+
+  - id: hts_tape
+    name: HTS tape & coated conductors
+    group: electronics
+    tier: 1
+    domains: [quantum_hardware, manufacturing]
+    keyword_sets: [superconducting_materials]
+    keywords: [REBCO, YBCO, BSCCO, coated conductor, second-generation tape,
+               2G tape, superconducting tape, rare-earth barium copper oxide]
+    link: "High-temperature superconducting tape for magnets, fault-current limiters and cables"
+
+  - id: lts_wire
+    name: LTS superconducting wire (NbTi, Nb3Sn)
+    group: electronics
+    tier: 1
+    domains: [quantum_hardware, manufacturing]
+    keyword_sets: [superconducting_materials]
+    keywords: [NbTi, Nb3Sn, niobium titanium, niobium tin, A15, multifilamentary,
+               superconducting strand, wind-and-react]
+    link: "Low-temperature superconducting wire for MRI, fusion and accelerator magnets"
+
+  - id: superconducting_electronics
+    name: Superconducting electronics & detectors
+    group: electronics
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [Josephson junction, SQUID, SNSPD, superconducting nanowire,
+               single-photon detector, transition-edge sensor, TES, RSFQ,
+               single flux quantum, kinetic inductance, cryogenic memory,
+               superconducting diode, cryo-CMOS]
+    link: "Josephson devices, SQUIDs, superconducting detectors and cryogenic logic"
+
+  - id: fiber_lasers
+    name: Fiber & diode lasers
+    group: electronics
+    tier: 1
+    domains: [manufacturing, quantum_hardware]
+    keywords: [fiber laser, laser diode, diode laser, semiconductor laser,
+               injection locking, distributed feedback, DFB, VCSEL,
+               external cavity laser, laser linewidth, frequency comb,
+               optical amplifier, EDFA, pump laser]
+    link: "High-power fiber lasers and semiconductor laser diodes for cutting, welding and instrumentation"
+
+  - id: graphene_2d
+    name: Graphene & 2D material production
+    group: chemicals
+    tier: 1
+    domains: [manufacturing, quantum_hardware]
+    keywords: [graphene, twisted bilayer, van der Waals heterostructure,
+               transition metal dichalcogenide, TMD, MoS2, WSe2, WS2, MoTe2,
+               hexagonal boron nitride, hBN, exfoliation, moire superlattice,
+               monolayer, few-layer]
+    link: "Bulk graphene, hBN and transition-metal dichalcogenide production and heterostructure fabrication"
+
+  - id: sputtering_targets
+    name: Sputtering targets & thin-film deposition
+    group: electronics
+    tier: 1
+    domains: [manufacturing, quantum_hardware]
+    keywords: [sputtering target, magnetron sputtering, molecular beam epitaxy,
+               MBE, atomic layer deposition, ALD, chemical vapor deposition, CVD,
+               pulsed laser deposition, epitaxial growth, thin-film growth,
+               ITO, indium tin oxide, substrate wafer]
+    link: "Sputtering targets and the deposition steps that make every thin-film device"
+
+  - id: thermoelectrics
+    name: Thermoelectric modules
+    group: electronics
+    tier: 2
+    domains: [manufacturing]
+    keywords: [thermoelectric, Seebeck, Peltier, figure of merit ZT,
+               bismuth telluride, Bi2Te3, thermal conductivity,
+               waste heat recovery, thermoelectric generator]
+    link: "Bi2Te3 thermoelectric modules for cooling and waste-heat recovery"
+
+
+  - id: mature_node_foundry
+    name: Mature-node chip foundry (28nm+)
+    group: electronics
+    tier: 1
+    domains: [quantum_hardware, manufacturing]
+    keywords: [cryo-CMOS, cryogenic CMOS, silicon photonics, CMOS-compatible,
+               foundry, 300 mm, FDSOI, wafer-scale]
+    link: "Mature-node silicon: power devices, sensors, analogue and silicon photonics"
+
+  - id: led_gan
+    name: LED chips & packaging
+    group: electronics
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [hBN, hexagonal boron nitride, single-photon emitter, InGaN,
+               GaN color center, quantum emitter]
+    link: "GaN LED chips, laser diodes and their epitaxy and packaging"
+
+  - id: ferrites_magnetics
+    name: Ferrite cores & magnetics
+    group: electronics
+    tier: 1
+    domains: [quantum_hardware]
+    keywords: [YIG, yttrium iron garnet, magnon, magnonics, cavity magnonics,
+               ferrite, ferrimagnet]
+    link: "Soft magnetic cores and ferrites for transformers, inductors and RF components"
+
+  # ---------------- Tier 2: quantum sensing applied to the industry ----------------
+  - {id: spherical_graphite, name: "Spherical graphite (battery anodes)", group: battery_chain, tier: 2, domains: [manufacturing], keywords: [graphite anode]}
+  - {id: lithium_conversion, name: "Lithium chemical conversion", group: battery_chain, tier: 2, domains: [manufacturing], keywords: [lithium hydroxide, lithium carbonate]}
+  - {id: lfp_cathode, name: "LFP cathode materials", group: battery_chain, tier: 2, domains: [manufacturing], keywords: [LFP, LiFePO4, lithium iron phosphate]}
+  - {id: lipf6, name: "LiPF6 electrolyte salts", group: battery_chain, tier: 2, domains: [manufacturing], keywords: [LiPF6]}
+  - {id: battery_separators, name: "Battery separators", group: battery_chain, tier: 2, domains: [manufacturing], keywords: [separator]}
+  - {id: copper_foil, name: "Battery-grade copper foil", group: battery_chain, tier: 2, domains: [manufacturing], keywords: [copper foil, current collector]}
+  - {id: battery_recycling, name: "Battery recycling (black mass)", group: battery_chain, tier: 2, domains: [manufacturing], keywords: [battery recycling, black mass]}
+  - {id: grid_storage, name: "Grid-scale battery storage", group: battery_chain, tier: 2, domains: [manufacturing], keywords: [grid storage, battery energy storage]}
+
+  - {id: electrical_steel, name: "Grain-oriented electrical steel", group: power_grid, tier: 2, domains: [manufacturing], keywords: [grain-oriented, electrical steel, silicon steel]}
+  - {id: power_transformers, name: "Power transformers", group: power_grid, tier: 2, domains: [manufacturing], keywords: [transformer core, power transformer]}
+  - {id: uhv_transmission, name: "UHV transmission equipment", group: power_grid, tier: 2, domains: [manufacturing], keywords: [UHV, ultra-high voltage, transmission line]}
+
+  - {id: iron_castings, name: "Iron castings (foundries)", group: industrial, tier: 2, domains: [manufacturing], keywords: [casting, cast iron]}
+  - {id: forgings, name: "Industrial forgings", group: industrial, tier: 2, domains: [manufacturing, aerospace], keywords: [forging, forged]}
+  - {id: wind_castings, name: "Wind turbine castings & forgings", group: power_grid, tier: 2, domains: [manufacturing], keywords: [wind turbine], keyword_sets: [ndt]}
+  - {id: fasteners, name: "Fasteners", group: industrial, tier: 2, domains: [manufacturing, aerospace], keywords: [fastener, bolt]}
+  - {id: welding, name: "Welding equipment & consumables", group: industrial, tier: 2, domains: [manufacturing], keywords: [weld, welding]}
+  - {id: small_motors, name: "Small electric motors", group: industrial, tier: 2, domains: [manufacturing], keywords: [electric motor, rotor, stator]}
+  - {id: hsr_rolling_stock, name: "High-speed rail rolling stock & track", group: industrial, tier: 2, domains: [manufacturing], keywords: [railway, rail track], keyword_sets: [inertial]}
+  - {id: tunnel_boring, name: "Tunnel boring machines", group: industrial, tier: 2, domains: [manufacturing], keywords: [tunnel boring, tunneling], keyword_sets: [subsurface]}
+
+  # ---------------- Tier 3: context tags only ----------------
+  # Critical minerals
+  - {id: antimony, name: "Antimony processing", group: critical_minerals, tier: 1, keywords: [antimony], link: "Antimony smelting and refining for alloys, flame retardants and glass"}
+  - {id: magnesium, name: "Magnesium metal smelting", group: critical_minerals, tier: 1, keywords: [magnesium alloy], link: "Magnesium smelting and lightweight structural alloys"}
+  - {id: vanadium, name: "Vanadium production", group: critical_minerals, tier: 1, keywords: [vanadium, VO2], link: "Vanadium production for steel alloying and flow-battery electrolytes"}
+  - {id: cobalt, name: "Cobalt refining", group: critical_minerals, tier: 1, keywords: [cobalt], link: "Cobalt refining for battery cathodes, superalloys and magnetic materials"}
+  - {id: manganese_sulfate, name: "High-purity manganese sulfate", group: critical_minerals, tier: 1, keywords: [manganese sulfate], link: "High-purity manganese sulfate for battery cathode precursors"}
+  - {id: titanium_sponge, name: "Titanium sponge", group: critical_minerals, tier: 1, keywords: [titanium, TiN], link: "Titanium sponge and mill products for aerospace and chemical plant"}
+  - {id: fluorspar_hf, name: "Fluorspar & hydrofluoric acid", group: critical_minerals, tier: 1, keywords: [hydrofluoric acid, HF etch, CaF2], link: "Fluorspar and hydrofluoric acid for etchants, fluoropolymers and electrolytes"}
+  - {id: silicon_metal, name: "Silicon metal", group: critical_minerals, tier: 1, keywords: [metallurgical silicon], link: "Silicon metal smelting, the feedstock for polysilicon and silicones"}
+  - {id: graphite_electrodes, name: "Graphite electrodes (EAF steel)", group: heavy_materials, tier: 2, keywords: [graphite electrode, electric arc furnace, needle coke], link: "Graphite electrodes for electric-arc steelmaking"}
+  # Chemicals
+  - {id: pharma_ksm, name: "Pharmaceutical key starting materials", group: chemicals, tier: 3, keywords: [key starting material]}
+  - {id: vitamins, name: "Vitamin production", group: chemicals, tier: 3, keywords: [vitamin]}
+  - {id: amino_acids, name: "Feed-grade amino acids", group: chemicals, tier: 3, keywords: [lysine, methionine]}
+  - {id: citric_acid, name: "Citric acid", group: chemicals, tier: 3, keywords: [citric acid]}
+  - {id: xanthan_gum, name: "Xanthan gum", group: chemicals, tier: 3, keywords: [xanthan]}
+  - {id: sweeteners, name: "High-intensity sweeteners", group: chemicals, tier: 3, keywords: [sucralose, aspartame, stevia]}
+  - {id: agrochemicals, name: "Agrochemical actives", group: chemicals, tier: 3, keywords: [glyphosate, pesticide, herbicide]}
+  - {id: tio2, name: "Titanium dioxide pigment", group: chemicals, tier: 2, keywords: [TiO2, titanium dioxide, titania, photocatalytic, photocatalysis], link: "Titanium dioxide pigment and photocatalytic titania"}
+  - {id: refrigerants, name: "Refrigerant gases (HFCs)", group: chemicals, tier: 2, keywords: [refrigerant, HFC, heat pump, thermodynamic cycle], link: "Refrigerant gases and their thermophysical properties"}
+  - {id: silicones, name: "Organosilicon & silicone monomers", group: chemicals, tier: 2, keywords: [silicone, siloxane, PDMS], link: "Organosilicon and silicone polymer synthesis and properties"}
+  - {id: yellow_phosphorus, name: "Yellow phosphorus", group: chemicals, tier: 2, keywords: [white phosphorus, yellow phosphorus, phosphorus, phosphide], link: "Yellow phosphorus and phosphorus chemistry"}
+  - {id: rubber_chemicals, name: "Rubber chemicals", group: chemicals, tier: 3, keywords: [vulcanization accelerator]}
+  - {id: dye_intermediates, name: "Dye & pigment intermediates", group: chemicals, tier: 2, keywords: [dye intermediate, pigment, chromophore, organic dye], link: "Dye and pigment intermediates and their optical properties"}
+  - {id: pta, name: "PTA (polyester feedstock)", group: chemicals, tier: 2, keywords: [terephthalic acid, polyester, terephthalate], link: "PTA and polyester feedstock chemistry"}
+  - {id: chlor_alkali, name: "Chlor-alkali", group: chemicals, tier: 2, keywords: [chlor-alkali, caustic soda, electrolysis, membrane electrode], link: "Chlor-alkali electrolysis: electrodes, membranes and cell efficiency"}
+  # Pharma & medical
+  - {id: generic_apis, name: "Generic APIs", group: pharma_medical, tier: 3, keywords: [active pharmaceutical ingredient]}
+  - {id: antibiotic_fermentation, name: "Antibiotic fermentation", group: pharma_medical, tier: 3, keywords: [penicillin, amoxicillin]}
+  - {id: bulk_analgesics, name: "Bulk analgesics", group: pharma_medical, tier: 3, keywords: [acetaminophen, paracetamol, ibuprofen]}
+  - {id: heparin, name: "Crude heparin", group: pharma_medical, tier: 3, keywords: [heparin]}
+  - {id: capsules_excipients, name: "Empty capsules & excipients", group: pharma_medical, tier: 3, keywords: [excipient]}
+  - {id: veterinary_apis, name: "Veterinary APIs", group: pharma_medical, tier: 3, keywords: [veterinary]}
+  - {id: medical_disposables, name: "Syringes, IV sets & disposables", group: pharma_medical, tier: 3, keywords: [syringe]}
+  - {id: masks_gowns, name: "Surgical masks & gowns", group: pharma_medical, tier: 3, keywords: [surgical mask, N95]}
+  # Power & grid
+  # Added 2026-09-30. Solar cell and module manufacturing is the most
+  # concentrated industry on this list and was entirely absent, which is why a
+  # perovskite tandem solar cell paper had nowhere to go.
+  - id: solar_pv_cells
+    name: Solar PV cells & modules
+    group: power_grid
+    tier: 1
+    domains: [manufacturing]
+    keywords: [solar cell, photovoltaic, PV module, perovskite, tandem solar,
+               heterojunction, TOPCon, PERC, passivation layer, light absorber,
+               power conversion efficiency, open-circuit voltage, fill factor,
+               carrier lifetime, anti-reflective coating, thin-film solar]
+    link: "Silicon, perovskite and tandem solar cell fabrication, efficiency and degradation"
+
+  - {id: solar_glass, name: "Solar-grade glass", group: power_grid, tier: 2, keywords: [solar glass, cover glass, light transmission], link: "Solar-grade glass: transmission, texturing and anti-reflective coatings"}
+  - {id: inverters, name: "String & central inverters", group: power_grid, tier: 2, keywords: [inverter, IGBT, SiC MOSFET, silicon carbide, power module], link: "Grid inverters: wide-bandgap switches, losses and reliability"}
+  - {id: hydro_turbines, name: "Pumped-storage & hydro turbines", group: power_grid, tier: 2, keywords: [hydropower, pumped storage, turbine blade, cavitation, hydraulic turbine], link: "Hydro and pumped-storage turbines: cavitation, erosion and efficiency"}
+  - {id: electrolyzers, name: "Alkaline electrolyzers", group: power_grid, tier: 2, keywords: [electrolyzer, water electrolysis, electrolyser, water splitting, hydrogen evolution, oxygen evolution, PEM, alkaline electrolysis], link: "Water electrolysers: catalysts, membranes and degradation"}
+  - {id: ev_chargers, name: "EV charging hardware", group: power_grid, tier: 2, keywords: [EV charging, fast charging, charging infrastructure], link: "EV charging hardware: power electronics, thermal and connector wear"}
+  # Industrial
+  - {id: bearings, name: "Low- to mid-range bearings", group: industrial, tier: 2, keywords: [bearing, tribology, wear resistance, rolling contact fatigue, lubrication], link: "Bearings: tribology, wear, fatigue and lubrication"}
+  - {id: hand_power_tools, name: "Hand & power tools", group: industrial, tier: 3, keywords: [power tool]}
+  - {id: cnc_machine_tools, name: "Mid-range CNC machine tools", group: industrial, tier: 2, keywords: [CNC, machining, machine tool, positioning accuracy, thermal drift, surface finish], link: "Machine tools: precision positioning, metrology and thermal drift"}
+  - {id: textile_machinery, name: "Textile machinery", group: industrial, tier: 3, keywords: [textile machinery]}
+  - {id: sewing_machines, name: "Industrial sewing machines", group: industrial, tier: 3, keywords: [sewing machine]}
+  - {id: sts_cranes, name: "Ship-to-shore port cranes", group: industrial, tier: 3, keywords: [port crane]}
+  - {id: containers, name: "Dry shipping containers", group: industrial, tier: 3, keywords: [shipping container]}
+  - {id: reefers, name: "Refrigerated containers", group: industrial, tier: 3, keywords: [refrigerated container]}
+  - {id: mobile_cranes, name: "Mobile & crawler cranes", group: industrial, tier: 3, keywords: [crawler crane]}
+  - {id: rail_freight_cars, name: "Rail freight cars", group: industrial, tier: 3, keywords: [freight car]}
+  - {id: elevators, name: "Elevators & escalators", group: industrial, tier: 3, keywords: [elevator, escalator]}
+  - {id: robot_deployment, name: "Industrial robot deployment", group: industrial, tier: 3, keywords: [industrial robot]}
+  - {id: tires, name: "Truck & bus tires", group: industrial, tier: 2, keywords: [tire, rubber compound, elastomer, rolling resistance, tread], link: "Tyre materials: rubber compounds, rolling resistance and wear"}
+  # Electronics
+  - {id: pcbs, name: "Printed circuit boards", group: electronics, tier: 2, keywords: [printed circuit board, PCB, printed circuit, copper plating, dielectric loss, laminate], link: "Printed circuit boards: laminates, plating and high-frequency loss"}
+  - {id: power_supplies, name: "Power adapters & supplies", group: electronics, tier: 2, keywords: [power supply, power converter, switching loss, DC-DC, rectifier], link: "Power adapters and converters: switching losses and magnetics"}
+  - {id: connectors, name: "Connectors & cable assemblies", group: electronics, tier: 2, keywords: [connector, coaxial cable, contact resistance, interconnect, signal integrity], link: "Connectors and cable assemblies: contact resistance and signal integrity"}
+  - {id: lcd_panels, name: "LCD panel manufacturing", group: electronics, tier: 2, keywords: [liquid crystal display, LCD, liquid crystal, display panel, TFT, backlight, OLED], link: "Display panel manufacturing: liquid crystals, backlights and TFT arrays"}
+  - {id: fiberglass_cloth, name: "Fiberglass yarn & electronic glass cloth", group: electronics, tier: 2, keywords: [glass fiber, fiberglass, glass fibre, E-glass], link: "Electronic-grade glass fibre and cloth for laminates"}
+  - {id: drone_components, name: "Drone components", group: electronics, tier: 3, keywords: [drone, UAV]}
+  - {id: security_cameras, name: "Security camera hardware", group: electronics, tier: 3, keywords: [surveillance camera]}
+  - {id: small_li_cells, name: "Small-format lithium cells", group: battery_chain, tier: 2, keywords: [18650, cylindrical cell], link: "Small-format lithium cell design, cycle life and thermal behaviour"}
+  # Heavy materials
+  - {id: aluminum_smelting, name: "Primary aluminum smelting", group: heavy_materials, tier: 2, keywords: [aluminum smelting, aluminium smelting, aluminum alloy, aluminium alloy, Hall-Heroult, smelting], link: "Primary aluminium smelting: cell efficiency and alloy properties"}
+  - {id: cement, name: "Cement", group: heavy_materials, tier: 2, keywords: [cement, concrete, clinker, hydration, cementitious], link: "Cement and concrete: clinker chemistry, hydration and durability"}
+  - {id: flat_glass, name: "Flat glass", group: heavy_materials, tier: 2, keywords: [float glass, glass coating, soda-lime], link: "Flat glass: float process, coatings and optical quality"}
+  - {id: met_coke, name: "Metallurgical coke", group: heavy_materials, tier: 2, keywords: [coke oven, metallurgical coke, blast furnace, coking], link: "Metallurgical coke and blast-furnace reduction chemistry"}
+  - {id: stainless_npi, name: "Nickel pig iron & stainless steel", group: heavy_materials, tier: 2, keywords: [stainless steel, nickel pig iron, austenitic], link: "Nickel pig iron and stainless steel metallurgy"}
+  - {id: ferroalloys, name: "Ferroalloys", group: heavy_materials, tier: 2, keywords: [ferrosilicon, ferromanganese, ferroalloy, ferrochrome], link: "Ferroalloy production and alloying element behaviour in steel"}
+  - {id: refractories, name: "Refractories", group: heavy_materials, tier: 2, keywords: [refractory, magnesia, alumina ceramic, thermal shock], link: "Refractory ceramics: thermal shock, creep and corrosion resistance"}
+  # Food, textiles & other
+  - {id: aquaculture, name: "Aquaculture incl. seaweed", group: food_textiles, tier: 3, keywords: [aquaculture, seaweed]}
+  - {id: synthetic_fibers, name: "Synthetic fibers (polyester, spandex)", group: food_textiles, tier: 2, keywords: [polyester, spandex, polyester fiber, fiber spinning, polymer fiber], link: "Synthetic fibre spinning and polymer mechanical properties"}
+  - {id: garment_trims, name: "Zippers, buttons & garment trims", group: food_textiles, tier: 3, keywords: [zipper]}
+
+# All industries above carry china_dominant: true by construction.
+# The agent should label tier-3 tags as:
+#   "China-dominant supply chain (from config; share unverified)"

@@ -1,0 +1,12 @@
+# Reader ratings of past reports. The agent reads this and never writes to it.
+#
+# After each report, add one entry per paper you have an opinion about. 1 = not
+# worth reading, 5 = exactly what I want more of. The comment is optional and is
+# the most useful part.
+#
+#   ratings:
+#     - arxiv_id: "2609.29990"
+#       week_of: "2026-09-30"
+#       rating: 4
+#       comment: "Right kind of paper, but the catch understated the thermal problem."
+ratings: []

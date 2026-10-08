@@ -1,0 +1,23 @@
+# Secrets
+.env
+
+# Virtualenv
+.venv/
+
+# Runtime state: the database must NOT be committed by accident, but the
+# directory has to exist for a fresh clone.
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Keep digests/ tracked -- the digests are the output you want to keep.
+!digests/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+
+# Rendered email previews: derived from the tracked Markdown.
+digests/*.email.html

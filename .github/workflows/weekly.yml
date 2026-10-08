@@ -1,0 +1,185 @@
+# Weekly digest: runs itself, emails the result, and keeps its own state.
+#
+# Three things here are not obvious and should not be "simplified" away:
+#
+#  1. TWO cron lines, not one. Cron on GitHub is UTC and knows nothing about
+#     daylight saving, so a single line silently becomes 9am every November.
+#     Both lines fire; the `schedule-gate` job checks the real local time in
+#     $TARGET_TZ and lets exactly one of them through. The other exits in
+#     seconds. To change the time, edit TARGET_TZ/TARGET_HOUR *and* both crons.
+#
+#  2. The SQLite database is carried between runs as an ARTIFACT, not committed.
+#     It is 22MB of abstracts and model-call logs and grows ~5MB a week; a year
+#     of weekly commits would be a quarter-gigabyte of binary in git history.
+#     Artifacts keep 90 days, which is far more headroom than a 7-day cadence
+#     needs. Without it the de-duplication table is empty and every run re-reads
+#     and re-features papers from previous weeks.
+#
+#  3. The small, human-readable state (the digest itself, the self-improvement
+#     proposals, the pipeline taxonomy) IS committed back, because those are
+#     meant to be read and reviewed in the repo. That commit also resets
+#     GitHub's 60-day inactivity timer, which would otherwise disable this
+#     schedule after two quiet months.
+
+name: Weekly Digest
+
+on:
+  schedule:
+    # 10:00 America/Chicago, covered in both halves of the year.
+    - cron: "0 15 * * 1"   # 10:00 CDT (UTC-5), summer
+    - cron: "0 16 * * 1"   # 10:00 CST (UTC-6), winter
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to run"
+        type: choice
+        default: preview
+        options:
+          - dry-run   # collection only, no model calls, no email. Free, ~2 min.
+          - preview   # full pipeline, writes the email, does NOT send it.
+          - send      # full pipeline and delivery.
+
+concurrency:
+  # A manual run must never overlap the scheduled one: both write the database.
+  group: weekly-digest
+  cancel-in-progress: false
+
+env:
+  TARGET_TZ: America/Chicago
+  TARGET_HOUR: "10"
+  PYTHON_VERSION: "3.12"
+  # Non-sensitive mail settings live here, in the open, where they are readable.
+  # Only the credentials and the recipient list are secrets.
+  SMTP_HOST: smtp.gmail.com
+  SMTP_PORT: "587"
+  EMAIL_SENDER_NAME: arXiv Industry Scout
+  EMAIL_SUBJECT_PREFIX: "[quant-ph Scout]"
+
+jobs:
+  # Cheap gate so the wrong-half-of-the-year cron costs ~3 seconds, not a run.
+  schedule-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+      mode: ${{ steps.check.outputs.mode }}
+    steps:
+      - id: check
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "manual run (mode: ${{ inputs.mode }})"
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          hour=$(TZ="$TARGET_TZ" date +%H)
+          echo "it is ${hour}:00 in ${TARGET_TZ}; target is ${TARGET_HOUR}:00"
+          if [ "$hour" = "$TARGET_HOUR" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "mode=send" >> "$GITHUB_OUTPUT"
+          else
+            echo "wrong side of daylight saving; the other cron handles today"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  digest:
+    needs: schedule-gate
+    if: needs.schedule-gate.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    # A full run is ~6 minutes; the ceiling is for a hung arXiv request that the
+    # per-request timeout somehow misses.
+    timeout-minutes: 45
+    permissions:
+      contents: write   # to commit the digest and proposals back
+      actions: read     # to download the previous run's database
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore the paper database
+        # Ephemeral runner: without this the de-duplication table starts empty
+        # and the run re-features papers that already went out weeks ago.
+        # `|| true` because the very first run has nothing to restore, which is
+        # correct and must not fail the job.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          mkdir -p data
+          run_id=$(gh run list --workflow="Weekly Digest" --status=success \
+            --limit 20 --json databaseId --jq '.[].databaseId' \
+            | while read -r id; do
+                if gh api "repos/${{ github.repository }}/actions/runs/$id/artifacts" \
+                     --jq '.artifacts[].name' 2>/dev/null | grep -qx scout-db; then
+                  echo "$id"; break
+                fi
+              done)
+          if [ -n "${run_id:-}" ]; then
+            echo "restoring database from run ${run_id}"
+            gh run download "$run_id" --name scout-db --dir data || true
+          else
+            echo "no previous database found; starting fresh"
+          fi
+          ls -lh data/ || true
+
+      - name: Run the pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          EMAIL_UNSUBSCRIBE: ${{ secrets.EMAIL_UNSUBSCRIBE }}
+        run: |
+          set -euo pipefail
+          case "${{ needs.schedule-gate.outputs.mode }}" in
+            dry-run) python -m scout run --dry-run -v ;;
+            preview) python -m scout run --no-email --email-preview -v ;;
+            send)    python -m scout run --email-preview -v ;;
+          esac
+
+      - name: Save the paper database
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scout-db
+          path: data/scout.db
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Save the digest and the rendered email
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ github.run_number }}
+          path: |
+            digests/*.md
+            digests/*.json
+            digests/*.email.html
+            logs/scout.log
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Commit the digest and any self-applied changes
+        # Only the small, reviewable text files. Rebase first: a manual run and
+        # a hand-edited feedback.yaml can both land between scheduled runs.
+        if: needs.schedule-gate.outputs.mode != 'dry-run'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A digests state pipelines.yaml
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git commit -m "digest: weekly run ${{ github.run_number }}"
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -1,0 +1,130 @@
+# Discovery-to-industry pipelines for the arXiv scout agent.
+# Each paper is tagged with one primary pipeline (and optionally one secondary),
+# then scored against readiness_checks before industry matching.
+
+version: 1
+
+pipelines:
+  - id: sensing
+    name: Environmental sensitivity -> Sensing
+    discovery_signals:
+      - quantum state or material property shifts measurably with an external quantity
+      - magnetic field, strain, temperature, pressure, gravity, or chemical sensitivity
+      - improved sensitivity, bandwidth, or noise floor vs prior work
+    becomes: [sensors, detectors, magnetometers, gravimeters]
+    typical_domains: [navigation, medical imaging, non-destructive testing, geophysical survey, defense]
+
+  - id: timing_metrology
+    name: Narrow, stable transitions -> Timing and metrology
+    discovery_signals:
+      - very sharp, reproducible energy levels or oscillations
+      - reduced drift, linewidth, or systematic uncertainty
+    becomes: [clocks, frequency references, calibration standards]
+    typical_domains: [GPS-denied navigation, telecom synchronization, precision manufacturing]
+
+  - id: functional_material
+    name: Extreme material property -> Functional or structural material
+    discovery_signals:
+      - new phase or composition with outlier properties
+      - strength-to-weight, thermal conductivity, friction, hardness, or transparency
+    becomes: [coatings, components, bulk materials]
+    typical_domains: [aerospace structures, tooling, thermal management]
+
+  - id: energy_transport
+    name: Anomalous transport -> Energy and power
+    discovery_signals:
+      - unusual electrical, thermal, or ionic conduction
+      - superconductivity, thermoelectricity, fast ion conduction
+    becomes: [power transmission, batteries, solid-state cooling, waste-heat recovery]
+    typical_domains: [energy storage, power grid, electronics cooling]
+
+  - id: logic_memory
+    name: New switching or state-storage mechanism -> Logic and memory
+    discovery_signals:
+      - controllable, bistable, or low-energy state change
+      - spin, topological, phase-change, or ferroelectric switching
+    becomes: [memory cells, transistors, neuromorphic hardware]
+    typical_domains: [semiconductors, computing hardware]
+
+  - id: photonics
+    name: Light-matter interaction -> Photonics
+    discovery_signals:
+      - new ways to generate, guide, convert, or detect light
+      - nonlinear effects, metamaterials, single-photon sources, new emitters
+    becomes: [lasers, modulators, detectors]
+    typical_domains: [communications, lidar, imaging, spectroscopy]
+
+  - id: transduction
+    name: Energy conversion between domains -> Transduction and actuation
+    discovery_signals:
+      - coupling between mechanical, electrical, magnetic, optical, or thermal domains
+      - piezoelectric, magnetostrictive, optomechanical, or electro-optic effects
+    becomes: [actuators, transducers, energy harvesters]
+    typical_domains: [robotics, precision positioning, microwave-to-optical links]
+
+  - id: quantum_hardware
+    name: Coherence or entanglement improvement -> Quantum hardware
+    discovery_signals:
+      - longer coherence, higher fidelity, higher operating temperature
+      - better qubit connectivity or entanglement distribution
+    becomes: [qubits, quantum networks, quantum repeaters]
+    typical_domains: [quantum computing, secure communication]
+
+  - id: extreme_environment
+    name: Robustness under harsh conditions -> Extreme-environment components
+    discovery_signals:
+      - property survives radiation, cryogenic or high temperature, vacuum, or shock
+    becomes: [rad-hard electronics, ruggedized sensors, instrumentation]
+    typical_domains: [space systems, nuclear instrumentation, downhole sensing]
+
+  - id: fabrication_process
+    name: New fabrication or growth technique -> Manufacturing process
+    discovery_signals:
+      - new deposition, etching, patterning, self-assembly, or crystal growth method
+      - higher yield, lower cost, or new achievable geometries
+    becomes: [process improvements, new manufacturing methods]
+    typical_domains: [semiconductor fabrication, additive manufacturing, thin films]
+
+  - id: inspection
+    name: New measurement technique -> Inspection and quality control
+    discovery_signals:
+      - novel way to image or probe matter
+      - new microscopy, spectroscopy, or scattering method
+    becomes: [metrology tools, inspection systems]
+    typical_domains: [fab quality control, failure analysis, non-destructive testing]
+
+  - id: enabling_infrastructure
+    name: Better isolation or control -> Enabling infrastructure
+    discovery_signals:
+      - advances in cooling, vibration isolation, shielding, vacuum, or laser stabilization
+    becomes: [cryostats, control electronics, stabilized platforms]
+    typical_domains: [supplies all other pipelines]
+
+  - id: design_tools
+    name: Theory or model insight -> Design and simulation tools
+    discovery_signals:
+      - new predictive model or computational method
+      - mapped phase diagram or design rules
+    becomes: [materials-discovery software, design rules]
+    typical_domains: [R&D acceleration across industries]
+
+  - id: none
+    name: No clear application pipeline
+    discovery_signals:
+      - purely foundational or theoretical result with no near-term physical handle
+    becomes: []
+    typical_domains: []
+    action: drop
+
+readiness_checks:
+  # Each scored 0-2: 0 = major barrier, 1 = partial / unclear, 2 = favorable.
+  - id: operating_conditions
+    question: Does it work without cryogenics, vacuum, or lab-grade isolation?
+  - id: scalability
+    question: Can it be made beyond a single sample, from available materials?
+  - id: integration
+    question: Is it compatible with existing fab processes or standard packaging?
+  - id: performance_margin
+    question: Is it a real step change over the incumbent technology, not incremental?
+  - id: reproducibility
+    question: Has it been demonstrated by more than one group or across multiple samples?

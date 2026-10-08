@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#
+# Block commits that carry a credential.
+#
+# This exists because .gitignore cannot protect you from the one env file that
+# is *meant* to be committed. A real API key and a real app password can end up
+# in .env.example -- it is the file you edit while you have the real values in
+# front of you, and it is tracked by design.
+#
+# Installed with:  git config core.hooksPath .githooks
+# Hooks do NOT travel with a clone. A fresh checkout must run that again.
+#
+# To bypass deliberately (e.g. a test fixture that looks like a key):
+#   git commit --no-verify
+
+set -uo pipefail
+
+fail=0
+note() { printf '\033[31mpre-commit: %s\033[0m\n' "$*" >&2; fail=1; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# 1. Key-shaped strings anywhere in the staged content.
+#    sk-ant-...  : Anthropic
+#    gh[pousr]_  : GitHub tokens
+#    AKIA...     : AWS access key ids
+#    re_...      : Resend
+while IFS= read -r file; do
+    [ -f "$file" ] || continue
+    case "$file" in
+        .githooks/pre-commit) continue ;;   # this file names the patterns
+    esac
+    # Both patterns are tuned against real false positives in this repo:
+    #   * each key shape requires an unbroken 24-character random run, so the
+    #     readable test fixture `sk-ant-from-the-dotenv-file` does not trip it
+    #     while a real `sk-ant-api03-<random>` does;
+    #   * the Resend prefix excludes '_' and '-', because with them it matched
+    #     ordinary test names like `test_papers_are_added_to_a_database`.
+    if git show ":$file" 2>/dev/null | grep -nE \
+        'sk-ant-[A-Za-z0-9_-]*[A-Za-z0-9]{24}|gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|(^|[^A-Za-z0-9_])re_[A-Za-z0-9]{24,}' \
+        >/dev/null; then
+        note "$file contains something shaped like an API key"
+    fi
+done <<< "$staged"
+
+# 2. A tracked .env-style file with a value actually filled in. An example file
+#    is fine; an example file with a password in it is the bug. Obvious
+#    placeholders are allowed -- an example file nobody can read is no use.
+while IFS= read -r file; do
+    case "$(basename "$file")" in
+        .env|.env.*|*.env) ;;
+        *) continue ;;
+    esac
+    [ -f "$file" ] || continue
+    while IFS= read -r line; do
+        value=${line#*=}
+        case "$value" in
+            # Placeholder shapes, not secrets.
+            ""|*REPLACE*|*CHANGE*|*YOUR*|*your-*|*example.com*|*EXAMPLE*|\<*|*...*) continue ;;
+            xxxx*|XXXX*) continue ;;
+        esac
+        note "$file sets $(printf '%s' "${line%%=*}" | tr -d ' ') to a real-looking value (placeholders only, please)"
+    done < <(git show ":$file" 2>/dev/null | grep -E \
+        '^[[:space:]]*(ANTHROPIC_API_KEY|[A-Z_]*_(TOKEN|SECRET|PASSWORD|KEY))=[^[:space:]#]{8,}')
+done <<< "$staged"
+
+# 3. The real .env must never be staged at all, whatever is in it.
+if grep -qx '.env' <<< "$staged"; then
+    note ".env is staged; it must stay untracked"
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "" >&2
+    echo "Commit blocked. Remove the secret, then re-stage." >&2
+    echo "If this is a false positive: git commit --no-verify" >&2
+    exit 1
+fi
+exit 0

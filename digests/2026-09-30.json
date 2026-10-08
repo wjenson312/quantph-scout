@@ -1,0 +1,42 @@
+{
+  "INVALID": "Debugging artifact from a broken stage order, not a real week. Do not include in trend analysis. See digests/2026-09-30.md and handoff.md \u00a70.",
+  "schema_version": 3,
+  "week_of": "2026-09-30",
+  "n_fetched": 1168,
+  "n_evaluated": 278,
+  "n_after_tag": 236,
+  "n_shortlisted": 20,
+  "max_readiness": 10,
+  "n_selected": 0,
+  "cost_usd": 0.6347,
+  "counts": {
+    "n_fetched": 1168,
+    "n_new": 278,
+    "n_gated_out": 153,
+    "n_excluded_revisions": 37,
+    "n_candidates_t1": 59,
+    "n_candidates_t2": 29,
+    "n_prefiltered_out": 0,
+    "n_budget_trimmed": 0,
+    "n_to_triage": 278,
+    "n_tagged": 278,
+    "n_tag_dropped": 42,
+    "n_after_tag": 236,
+    "n_readiness_scored": 236,
+    "n_shortlisted": 20,
+    "n_matched": 2,
+    "n_match_dropped": 18,
+    "n_assessed": 2,
+    "n_verified": 2,
+    "n_verify_dropped": 2,
+    "n_selected": 0,
+    "n_proposals": 2,
+    "n_auto_applied": 0
+  },
+  "picks": [],
+  "improvement": {
+    "applied": [],
+    "escalated": [],
+    "tracked": 2
+  }
+}
