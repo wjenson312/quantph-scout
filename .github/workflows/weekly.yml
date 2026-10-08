@@ -33,11 +33,18 @@ on:
       mode:
         description: "What to run"
         type: choice
-        default: preview
+        default: collect
         options:
-          - dry-run   # collection only, no model calls, no email. Free, ~2 min.
-          - preview   # full pipeline, writes the email, does NOT send it.
-          - send      # full pipeline and delivery.
+          # Stage 1 only. No API key needed, no model calls, genuinely free.
+          # Proves the runner reaches arXiv and that the database restored.
+          - collect
+          # Through readiness scoring: Haiku over the whole corpus, no Sonnet.
+          # NOT free -- about $0.60 at a full week's volume.
+          - dry-run
+          # The full pipeline. Writes and uploads the email, does NOT send it.
+          - preview
+          # The full pipeline and delivery.
+          - send
 
 concurrency:
   # A manual run must never overlap the scheduled one: both write the database.
@@ -140,6 +147,7 @@ jobs:
         run: |
           set -euo pipefail
           case "${{ needs.schedule-gate.outputs.mode }}" in
+            collect) python -m scout run --until ingest -v ;;
             dry-run) python -m scout run --dry-run -v ;;
             preview) python -m scout run --no-email --email-preview -v ;;
             send)    python -m scout run --email-preview -v ;;
@@ -170,7 +178,9 @@ jobs:
       - name: Commit the digest and any self-applied changes
         # Only the small, reviewable text files. Rebase first: a manual run and
         # a hand-edited feedback.yaml can both land between scheduled runs.
-        if: needs.schedule-gate.outputs.mode != 'dry-run'
+        if: >-
+          needs.schedule-gate.outputs.mode == 'preview' ||
+          needs.schedule-gate.outputs.mode == 'send'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"

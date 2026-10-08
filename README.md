@@ -1009,9 +1009,13 @@ are never clobbered.
 
 | Mode | Proves | Cost |
 |---|---|---|
-| `dry-run` | The runner reaches arXiv and the pipeline starts | $0 |
-| `preview` | Screening and writing work; uploads the rendered email | ~$1.30 |
+| `collect` | The runner reaches arXiv and the database restored | $0 |
+| `dry-run` | Tagging and readiness scoring work end to end | ~$0.60 |
+| `preview` | The whole pipeline; uploads the rendered email, sends nothing | ~$1.30 |
 | `send` | The full path including SMTP | ~$1.30 |
+
+Start with `collect`: it needs no secrets at all, so it is also the fastest way
+to confirm the workflow file itself is valid.
 
 `gh workflow run` **returns immediately** — a clean terminal means *queued*, not
 *succeeded*. To actually wait:
