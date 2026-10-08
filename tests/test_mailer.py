@@ -298,14 +298,63 @@ def test_sender_name_appears_on_the_from_line(smtp):
     assert smtp.sent["From"] == "arXiv Scout <scout@example.com>"
 
 
-def test_markdown_is_attached_for_the_archive(smtp):
+def test_markdown_is_not_attached_by_default(smtp):
+    """`text/markdown` is an unrecognised subtype and a junk signal."""
     _send()
-    names = [part.get_filename() for part in smtp.sent.walk()]
-    assert "2026-10-02.md" in names
+    assert "2026-10-02.md" not in [part.get_filename() for part in smtp.sent.walk()]
 
 
-def test_headers_mark_the_message_as_bulk(smtp):
+def test_markdown_attachment_can_be_switched_back_on(smtp):
+    _send(EmailConfig(**{**CONFIGURED.__dict__, "attach_markdown": True}))
+    assert "2026-10-02.md" in [part.get_filename() for part in smtp.sent.walk()]
+
+
+def test_message_has_an_id(smtp):
     _send()
-    assert smtp.sent["Precedence"] == "bulk"
-    assert smtp.sent["Auto-Submitted"] == "auto-generated"
     assert re.match(r"<.+@.+>", smtp.sent["Message-ID"] or "")
+
+
+# --- deliverability --------------------------------------------------------
+#
+# Every assertion below is a header that put this digest in Junk, or a positive
+# signal that keeps it out. They are not style preferences.
+
+
+def test_self_demoting_headers_are_never_set(smtp):
+    """`Precedence: bulk` and `Auto-Submitted` tell a filter to demote the mail.
+
+    They buy nothing for a hand-managed list, and Google's sender guidance
+    advises against Precedence outright. Setting them landed the digest in Junk.
+    """
+    _send()
+    assert smtp.sent["Precedence"] is None
+    assert smtp.sent["Auto-Submitted"] is None
+
+
+def test_a_single_recipient_is_addressed_directly(smtp):
+    """From == To == the same address is what a spoofed phish looks like.
+
+    With one recipient there is no privacy to protect, so Bcc buys nothing and
+    the blast shape costs deliverability.
+    """
+    one = EmailConfig(**{**CONFIGURED.__dict__, "recipients": ("solo@example.com",)})
+    _send(one)
+    assert smtp.sent["To"] == "solo@example.com"
+    assert smtp.sent["Bcc"] is None
+
+
+def test_several_recipients_still_go_in_bcc(smtp):
+    """The privacy guarantee must survive the deliverability fix."""
+    _send()
+    assert smtp.sent["Bcc"] == "one@example.com, two@example.com"
+    assert "two@example.com" not in (smtp.sent["To"] or "")
+
+
+def test_list_id_is_set_when_configured(smtp):
+    _send(EmailConfig(**{**CONFIGURED.__dict__, "list_id": "scout.example.com"}))
+    assert smtp.sent["List-Id"] == "scout.example.com"
+
+
+def test_list_id_is_omitted_rather_than_invented(smtp):
+    _send()
+    assert smtp.sent["List-Id"] is None

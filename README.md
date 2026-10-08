@@ -1014,11 +1014,45 @@ are never clobbered.
 | `preview` | The whole pipeline; uploads the rendered email, sends nothing | ~$1.30 |
 | `send` | The full path including SMTP | ~$1.30 |
 | `seed` | — (not a test; see below) | $0 |
+| `resend` | Re-delivers the newest digest. SMTP only, no pipeline | $0 |
 
 Start with `collect`: it needs no secrets at all, so it is also the fastest way
 to confirm the workflow file itself is valid.
 
 Both `collect` and `seed` accept a `since` date, as does every other mode.
+
+### If the digest lands in Junk
+
+Deliverability is mostly about what the message does *not* claim about itself.
+The first version set three things that are self-demoting:
+
+| Removed | Why it hurt |
+|---|---|
+| `Precedence: bulk` | Legacy "this is bulk mail" marker. Google's sender guidance advises against it, and it buys nothing for a hand-managed list. |
+| `Auto-Submitted: auto-generated` | Same category: marks the mail as machine-generated. Its real job is suppressing vacation replies, which is not worth the cost. |
+| `text/markdown` attachment | An unrecognised attachment subtype on automated mail. The digest is already archived in the repo and as an artifact, so it was redundant. |
+
+Also fixed: **a single recipient is now addressed in `To:` directly** rather
+than `To: yourself, Bcc: them`. That shape is a bulk blast, and when the list is
+just you it makes `From` and `To` identical — which is what a spoofed phishing
+message looks like. Several recipients still go in Bcc; that privacy guarantee
+is unchanged and tested.
+
+Kept, because they are *positive* signals: `List-Unsubscribe` (what renders the
+native Unsubscribe button), and `List-Id` if you set `EMAIL_LIST_ID`.
+
+Test changes with `resend` — it re-delivers the newest digest over SMTP with no
+pipeline run, so iterating costs nothing:
+
+```bash
+gh workflow run "Weekly Digest" -f mode=resend
+```
+
+If it still lands in Junk, the remaining lever is the sending identity. Mail
+from a personal Gmail address to yourself has no domain reputation behind it;
+marking it "Not junk" once usually settles it permanently. For a real
+subscriber list, move to Resend or SES with your own domain and set up
+SPF, DKIM and DMARC — that, not headers, is what actually earns inbox placement.
 
 ### Ingest marks papers as seen, even if you never look at them
 

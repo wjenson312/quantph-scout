@@ -51,6 +51,10 @@ on:
           # Everything in the window is then permanently skipped, so give it a
           # range you have already judged somewhere else. Free.
           - seed
+          # Re-send the newest digest already in the repository. No pipeline,
+          # no model calls, no database writes -- just SMTP. This is the mode
+          # for testing deliverability, which otherwise costs $1.30 a try.
+          - resend
       since:
         description: "Backfill from this date (YYYY-MM-DD). Blank = the normal rolling window."
         type: string
@@ -169,6 +173,7 @@ jobs:
             dry-run) python -m scout run --dry-run $since -v ;;
             preview) python -m scout run --no-email --email-preview $since -v ;;
             send)    python -m scout run --email-preview $since -v ;;
+            resend)  python -m scout email --send -v ;;
           esac
 
       - name: Save the paper database
@@ -178,7 +183,9 @@ jobs:
         # seen without ever looking at it, and those papers could then never be
         # featured. Keeping collect's database out of the artifact store makes
         # the free connectivity check genuinely side-effect free.
-        if: always() && needs.schedule-gate.outputs.mode != 'collect'
+        if: >-
+          always() && needs.schedule-gate.outputs.mode != 'collect'
+          && needs.schedule-gate.outputs.mode != 'resend'
         # `seed` deliberately DOES persist -- that is its entire purpose.
         uses: actions/upload-artifact@v4
         with:
