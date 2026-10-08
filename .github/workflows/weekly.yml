@@ -45,6 +45,12 @@ on:
           - preview
           # The full pipeline and delivery.
           - send
+          # Ingest a window and record it as seen WITHOUT screening it, then
+          # keep that database. Use only to reconcile history -- for example
+          # after running locally for a while, or after losing the artifact.
+          # Everything in the window is then permanently skipped, so give it a
+          # range you have already judged somewhere else. Free.
+          - seed
       since:
         description: "Backfill from this date (YYYY-MM-DD). Blank = the normal rolling window."
         type: string
@@ -159,6 +165,7 @@ jobs:
           fi
           case "${{ needs.schedule-gate.outputs.mode }}" in
             collect) python -m scout run --until ingest $since -v ;;
+            seed)    python -m scout run --until ingest $since -v ;;
             dry-run) python -m scout run --dry-run $since -v ;;
             preview) python -m scout run --no-email --email-preview $since -v ;;
             send)    python -m scout run --email-preview $since -v ;;
@@ -172,6 +179,7 @@ jobs:
         # featured. Keeping collect's database out of the artifact store makes
         # the free connectivity check genuinely side-effect free.
         if: always() && needs.schedule-gate.outputs.mode != 'collect'
+        # `seed` deliberately DOES persist -- that is its entire purpose.
         uses: actions/upload-artifact@v4
         with:
           name: scout-db
