@@ -1,0 +1,23 @@
+# quantph-scout -- weekly run, Mondays at 10:00 America/Chicago.
+#
+# Monday 10:00 rather than a Sunday-night start: the pipeline uses the
+# SYNCHRONOUS API, not the Message Batches API, so there is no batch turnaround
+# that could miss the delivery window. A full run takes a few minutes. If you ever
+# switch to Batches for the 50% discount, move this to Sunday night -- batches
+# usually finish within the hour but are only guaranteed within 24.
+#
+# Install with:  crontab -e     (then paste everything below)
+# Verify with:   crontab -l
+#
+# CRON_TZ applies to every schedule line that follows it in the file, so it must
+# appear BEFORE the job line. It is supported by the cron on Raspberry Pi OS
+# (Debian's default, vixie-cron/cronie). Without it, cron uses the system
+# timezone -- see the README for how to check which you have.
+CRON_TZ=America/Chicago
+
+# Send cron's own output somewhere you'll see it. Optional; the script also
+# appends everything to logs/cron.log regardless.
+MAILTO=""
+
+# min hour dom mon dow  command
+0 10 * * 1 /home/pi/quantph-scout/scripts/run_weekly.sh
