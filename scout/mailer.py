@@ -550,34 +550,56 @@ def send_digest(
     message["From"] = (
         f"{email.sender_name} <{sender}>" if email.sender_name else sender
     )
-    # Recipients are Bcc, never To/Cc: To: would hand every subscriber's address
-    # to every other subscriber. To: is set to the sender so clients have
-    # something to display instead of "undisclosed recipients".
-    message["To"] = sender
-    message["Bcc"] = ", ".join(email.recipients)
+    # Addressing, and why it changes with the size of the list.
+    #
+    # For several recipients the addresses MUST go in Bcc: To:/Cc: would hand
+    # every subscriber's address to every other subscriber.
+    #
+    # But "To: myself, Bcc: everyone" is also the exact shape of a bulk blast,
+    # and for a one-person list it additionally makes From and To the same
+    # address -- which is what a spoofed phishing message looks like, and is a
+    # reliable way to land in Junk. With a single recipient there is nothing to
+    # protect, so address them directly and skip Bcc entirely.
+    if len(email.recipients) == 1:
+        message["To"] = email.recipients[0]
+    else:
+        message["To"] = sender
+        message["Bcc"] = ", ".join(email.recipients)
     message["Date"] = formatdate(localtime=True)
     message["Message-ID"] = make_msgid(domain=sender.split("@")[-1] or None)
+    # List-Unsubscribe is a POSITIVE signal: it is what Gmail and Apple Mail
+    # read to show a native Unsubscribe button, and its presence is part of
+    # Google's own sender guidance.
     if unsub_header:
         message["List-Unsubscribe"] = unsub_header
     if one_click:
         message["List-Unsubscribe-Post"] = one_click
-    # Marks this as bulk mail, which is both honest and what keeps an
-    # auto-responder from replying to every issue.
-    message["Auto-Submitted"] = "auto-generated"
-    message["Precedence"] = "bulk"
+    # List-Id identifies this as a real mailing list, which is the modern,
+    # well-regarded way to say what `Precedence: bulk` used to say.
+    #
+    # `Precedence: bulk` and `Auto-Submitted` are deliberately NOT set. They are
+    # legacy self-demotion: they tell a filter "this is machine-generated bulk
+    # mail" and buy nothing in return, and Google's sender guidance explicitly
+    # advises against Precedence. Setting them put this digest in Junk.
+    if email.list_id:
+        message["List-Id"] = email.list_id
 
     # Plain part first: multipart/alternative means last-wins, so HTML is the
     # preferred alternative and the Markdown is the fallback.
     message.set_content(markdown)
     message.add_alternative(render_html(email, markdown), subtype="html")
-    # The Markdown file rides along too, so the archive copy survives any client
-    # that mangles both bodies.
-    message.add_attachment(
-        markdown.encode("utf-8"),
-        maintype="text",
-        subtype="markdown",
-        filename=path.name,
-    )
+    # The Markdown file can ride along, but it is off by default: `text/markdown`
+    # is a subtype many filters do not recognise, and an unrecognised attachment
+    # on automated mail is a junk signal. The archive copy already exists in the
+    # repository and as a workflow artifact, so the attachment is redundant for
+    # the normal setup. EMAIL_ATTACH_MARKDOWN=1 puts it back.
+    if email.attach_markdown:
+        message.add_attachment(
+            markdown.encode("utf-8"),
+            maintype="text",
+            subtype="markdown",
+            filename=path.name,
+        )
 
     password = _normalize_password(email.password or "")
     context = _ssl_context()

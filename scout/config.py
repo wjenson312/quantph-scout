@@ -262,6 +262,13 @@ class EmailConfig:
     # A URL (rendered as a link, enables one-click unsubscribe) or an address
     # (rendered as "just reply"). Empty falls back to replying to the sender.
     unsubscribe: str = ""
+    # RFC 2919 list identity, e.g. "quantph-scout.example.com". A positive
+    # deliverability signal; empty omits the header rather than inventing one.
+    list_id: str = ""
+    # Attach the Markdown source. Off by default: `text/markdown` is a subtype
+    # many spam filters do not recognise, and the digest is already archived in
+    # the repository and as a workflow artifact.
+    attach_markdown: bool = False
 
     @property
     def enabled(self) -> bool:
@@ -418,6 +425,9 @@ def load_config(root: Path | None = None, *, env_file: Path | None = None) -> Co
             else "[quant-ph Scout]"
         ),
         unsubscribe=os.getenv("EMAIL_UNSUBSCRIBE") or "",
+        list_id=os.getenv("EMAIL_LIST_ID") or "",
+        attach_markdown=(os.getenv("EMAIL_ATTACH_MARKDOWN") or "").strip().lower()
+        in {"1", "true", "yes", "on"},
     )
 
     return Config(
