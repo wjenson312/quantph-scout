@@ -45,6 +45,12 @@ on:
           - preview
           # The full pipeline and delivery.
           - send
+      since:
+        description: "Backfill from this date (YYYY-MM-DD). Blank = the normal rolling window."
+        type: string
+        required: false
+        default: ""
+
 
 concurrency:
   # A manual run must never overlap the scheduled one: both write the database.
@@ -146,15 +152,26 @@ jobs:
           EMAIL_UNSUBSCRIBE: ${{ secrets.EMAIL_UNSUBSCRIBE }}
         run: |
           set -euo pipefail
+          since=""
+          if [ -n "${{ inputs.since }}" ]; then
+            since="--since ${{ inputs.since }}"
+            echo "backfilling from ${{ inputs.since }} instead of the rolling window"
+          fi
           case "${{ needs.schedule-gate.outputs.mode }}" in
-            collect) python -m scout run --until ingest -v ;;
-            dry-run) python -m scout run --dry-run -v ;;
-            preview) python -m scout run --no-email --email-preview -v ;;
-            send)    python -m scout run --email-preview -v ;;
+            collect) python -m scout run --until ingest $since -v ;;
+            dry-run) python -m scout run --dry-run $since -v ;;
+            preview) python -m scout run --no-email --email-preview $since -v ;;
+            send)    python -m scout run --email-preview $since -v ;;
           esac
 
       - name: Save the paper database
-        if: always()
+        # NOT on `collect`. Ingest records every paper it fetches as "seen",
+        # and dedupe is purely "is this id already in the database" -- so a
+        # collect run that stops before screening would mark a whole window as
+        # seen without ever looking at it, and those papers could then never be
+        # featured. Keeping collect's database out of the artifact store makes
+        # the free connectivity check genuinely side-effect free.
+        if: always() && needs.schedule-gate.outputs.mode != 'collect'
         uses: actions/upload-artifact@v4
         with:
           name: scout-db
