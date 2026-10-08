@@ -1013,9 +1013,54 @@ are never clobbered.
 | `dry-run` | Tagging and readiness scoring work end to end | ~$0.60 |
 | `preview` | The whole pipeline; uploads the rendered email, sends nothing | ~$1.30 |
 | `send` | The full path including SMTP | ~$1.30 |
+| `seed` | — (not a test; see below) | $0 |
 
 Start with `collect`: it needs no secrets at all, so it is also the fastest way
 to confirm the workflow file itself is valid.
+
+Both `collect` and `seed` accept a `since` date, as does every other mode.
+
+### Ingest marks papers as seen, even if you never look at them
+
+This is the sharpest edge in the whole system and it has already bitten once.
+
+De-duplication asks exactly one question: *is this arXiv id already in the
+`papers` table?* Nothing else. So any run that reaches the ingest stage records
+its whole window as seen — **including a run that stops before screening
+anything.** Those papers are then skipped forever and can never be featured.
+
+Two `collect` runs did this during setup: they ingested 2,224 papers to prove
+the artifact round-trip worked, and the next real run correctly found zero new
+papers and emailed an empty digest.
+
+Two guards now exist:
+
+- **`collect` does not upload its database.** The free connectivity check is
+  side-effect free, so it can be run as often as you like.
+- **`seed` exists for when you actually want this.** It ingests a window and
+  keeps the database *without* screening it — the right tool when history lives
+  somewhere else and you need this database to know about it. It is free, and it
+  permanently excludes everything in the window, so only give it a range you
+  have already judged elsewhere.
+
+`seed` was needed once already: local runs and Actions runs keep *separate*
+databases, so after moving to Actions the papers screened on the laptop were
+unknown to the cloud. Three papers from the 2026-10-02 issue fell back inside
+the first scheduled run's 14-day fetch window and would have been sent twice.
+
+```bash
+# "Everything up to this date has already been judged elsewhere."
+gh workflow run "Weekly Digest" -f mode=seed -f since=2026-09-20
+```
+
+### The fetch window is 14 days, and there is no separate report window
+
+`window_days` (7) + `lookback_days` (7). Everything fetched in those 14 days that
+is not already in the database is screened and can be featured. The lookback is
+not a "don't report these" zone — it works *only* because the earlier week is
+already in the database. **An empty database plus a 14-day window re-features two
+weeks of papers.** This is why losing the artifact is not harmless, and why the
+recovery is `seed` followed by a normal run, not just a normal run.
 
 `gh workflow run` **returns immediately** — a clean terminal means *queued*, not
 *succeeded*. To actually wait:
