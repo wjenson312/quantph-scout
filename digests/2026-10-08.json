@@ -1,0 +1,41 @@
+{
+  "schema_version": 3,
+  "week_of": "2026-10-08",
+  "n_fetched": 2132,
+  "n_evaluated": 0,
+  "n_after_tag": 0,
+  "n_shortlisted": 0,
+  "max_readiness": 10,
+  "n_selected": 0,
+  "cost_usd": 0.0,
+  "counts": {
+    "n_fetched": 2132,
+    "n_new": 0,
+    "n_gated_out": 0,
+    "n_excluded_revisions": 167,
+    "n_candidates_t1": 0,
+    "n_candidates_t2": 0,
+    "n_prefiltered_out": 0,
+    "n_budget_trimmed": 0,
+    "n_to_triage": 0,
+    "n_tagged": 0,
+    "n_tag_dropped": 0,
+    "n_after_tag": 0,
+    "n_matched": 0,
+    "n_match_dropped": 0,
+    "n_readiness_scored": 0,
+    "n_shortlisted": 0,
+    "n_assessed": 0,
+    "n_verified": 0,
+    "n_verify_dropped": 0,
+    "n_selected": 0,
+    "n_proposals": 2,
+    "n_auto_applied": 0
+  },
+  "picks": [],
+  "improvement": {
+    "applied": [],
+    "escalated": [],
+    "tracked": 2
+  }
+}
