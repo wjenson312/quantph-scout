@@ -103,6 +103,7 @@ pipelines:
   - id: design_tools
     name: Theory or model insight -> Design and simulation tools
     discovery_signals:
+      - One-way SPIR protocol exploiting NISQ device memory constraints—quantum information processing with noisy hardware; Sequential response capacity and information theory bounds for quantum processes—theoretical characterization without direct hardware application; Stark shift measurements and spectroscopic characterization of hydrogenic ions using eight-component relativistic theory—atomic spectroscopy technique  # auto-added 2026-10-12 after 3 occurrences (signal-design-tools)
       - new predictive model or computational method
       - mapped phase diagram or design rules
     becomes: [materials-discovery software, design rules]
