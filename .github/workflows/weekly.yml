@@ -1,12 +1,20 @@
 # Weekly digest: runs itself, emails the result, and keeps its own state.
 #
-# Three things here are not obvious and should not be "simplified" away:
+# Four things here are not obvious and should not be "simplified" away:
 #
-#  1. TWO cron lines, not one. Cron on GitHub is UTC and knows nothing about
-#     daylight saving, so a single line silently becomes 9am every November.
-#     Both lines fire; the `schedule-gate` job checks the real local time in
-#     $TARGET_TZ and lets exactly one of them through. The other exits in
-#     seconds. To change the time, edit TARGET_TZ/TARGET_HOUR *and* both crons.
+#  1. SEVEN cron lines, not one. GitHub cron is best-effort: it fires late by
+#     10-60+ minutes as a matter of course, and under load it drops firings
+#     entirely, with no retry and no notification. One cron a week therefore
+#     means one chance a week. The six Monday lines are a retry ladder and the
+#     seventh is a Tuesday catch-up; `schedule-gate` lets exactly one of them
+#     through and the rest exit in seconds.
+#
+#     The gate decides by asking "is it Monday in $TARGET_TZ, and has a digest
+#     already gone out today?" -- NOT by comparing the clock to the cron that
+#     fired. That is what makes a late delivery still send instead of being
+#     silently discarded, and it is also why no daylight-saving arithmetic
+#     appears anywhere: local date and local weekday are already correct in
+#     both halves of the year.
 #
 #  2. The SQLite database is carried between runs as an ARTIFACT, not committed.
 #     It is 22MB of abstracts and model-call logs and grows ~5MB a week; a year
@@ -15,19 +23,36 @@
 #     needs. Without it the de-duplication table is empty and every run re-reads
 #     and re-features papers from previous weeks.
 #
-#  3. The small, human-readable state (the digest itself, the self-improvement
-#     proposals, the pipeline taxonomy) IS committed back, because those are
-#     meant to be read and reviewed in the repo. That commit also resets
-#     GitHub's 60-day inactivity timer, which would otherwise disable this
-#     schedule after two quiet months.
+#  3. The small, human-readable state (the digest itself, the send marker, the
+#     self-improvement proposals, the pipeline taxonomy) IS committed back,
+#     because those are meant to be read and reviewed in the repo. That commit
+#     also resets GitHub's 60-day inactivity timer, which would otherwise
+#     disable this schedule after two quiet months. If it ever does get
+#     disabled, GitHub emails the repo admin first and the Actions tab has a
+#     button to re-enable it.
+#
+#  4. `state/last_sent` is the idempotency marker, and it is written only after
+#     a real `send`. If the email goes out but the marker fails to push, a later
+#     rung of the ladder sends a duplicate. That is deliberate: with retries you
+#     must choose which way to fail, and a rare duplicate beats a silent week.
 
 name: Weekly Digest
 
 on:
   schedule:
-    # 10:00 America/Chicago, covered in both halves of the year.
-    - cron: "0 15 * * 1"   # 10:00 CDT (UTC-5), summer
-    - cron: "0 16 * * 1"   # 10:00 CST (UTC-6), winter
+    # The retry ladder. All six are Monday in America/Chicago, year-round.
+    # The first rung is the one you actually want; the rest exist only because
+    # GitHub may not deliver it.
+    - cron: "0 15 * * 1"   # 10:00 CDT / 09:00 CST  <- the target
+    - cron: "0 16 * * 1"   # 11:00 CDT / 10:00 CST  <- the target in winter
+    - cron: "0 18 * * 1"   # early afternoon
+    - cron: "0 21 * * 1"   # late afternoon
+    - cron: "0 1  * * 2"   # Monday evening in Chicago
+    - cron: "0 4  * * 2"   # Monday night in Chicago
+    # The catch-up. Tuesday morning in Chicago, and it fires ONLY if Monday
+    # produced nothing at all -- so a bad Monday still gets you a weekly email
+    # rather than a seven-day gap.
+    - cron: "0 12 * * 2"   # 07:00 CDT / 06:00 CST Tuesday
   workflow_dispatch:
     inputs:
       mode:
@@ -43,7 +68,8 @@ on:
           - dry-run
           # The full pipeline. Writes and uploads the email, does NOT send it.
           - preview
-          # The full pipeline and delivery.
+          # The full pipeline and delivery. Records state/last_sent, which
+          # suppresses the rest of the day's ladder.
           - send
           # Ingest a window and record it as seen WITHOUT screening it, then
           # keep that database. Use only to reconcile history -- for example
@@ -54,6 +80,8 @@ on:
           # Re-send the newest digest already in the repository. No pipeline,
           # no model calls, no database writes -- just SMTP. This is the mode
           # for testing deliverability, which otherwise costs $1.30 a try.
+          # Deliberately does NOT record a send: a deliverability test on a
+          # Monday must not suppress that day's real digest.
           - resend
       since:
         description: "Backfill from this date (YYYY-MM-DD). Blank = the normal rolling window."
@@ -64,11 +92,17 @@ on:
 
 concurrency:
   # A manual run must never overlap the scheduled one: both write the database.
+  # This also serialises the retry ladder -- a queued rung's gate does not run
+  # until the one in front of it has finished and pushed its marker, so two
+  # rungs cannot both decide to send.
   group: weekly-digest
   cancel-in-progress: false
 
 env:
   TARGET_TZ: America/Chicago
+  # A soft preference, not a gate: the only cron it can hold back is the 15:00
+  # UTC rung during winter, which 16:00 UTC then covers an hour later. Later
+  # rungs never check the hour, so this cannot cause a silent week.
   TARGET_HOUR: "10"
   PYTHON_VERSION: "3.12"
   # Non-sensitive mail settings live here, in the open, where they are readable.
@@ -77,33 +111,73 @@ env:
   SMTP_PORT: "587"
   EMAIL_SENDER_NAME: arXiv Industry Scout
   EMAIL_SUBJECT_PREFIX: "[quant-ph Scout]"
+  # RFC 2919 list identity. A positive deliverability signal, and the reason
+  # the List-Id header exists at all -- scout/config.py reads this name, so
+  # leaving it unset silently drops the header.
+  EMAIL_LIST_ID: quantph-scout.wjenson312.github.io
 
 jobs:
-  # Cheap gate so the wrong-half-of-the-year cron costs ~3 seconds, not a run.
+  # Cheap gate so a rung that is not needed costs ~15 seconds, not a run.
   schedule-gate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       proceed: ${{ steps.check.outputs.proceed }}
       mode: ${{ steps.check.outputs.mode }}
     steps:
+      # Needed only to read state/last_sent, which is the whole decision.
+      - uses: actions/checkout@v4
+
       - id: check
         run: |
           set -euo pipefail
+
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "manual run (mode: ${{ inputs.mode }})"
             echo "proceed=true" >> "$GITHUB_OUTPUT"
             echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          today=$(TZ="$TARGET_TZ" date +%F)
           hour=$(TZ="$TARGET_TZ" date +%H)
-          echo "it is ${hour}:00 in ${TARGET_TZ}; target is ${TARGET_HOUR}:00"
-          if [ "$hour" = "$TARGET_HOUR" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            echo "mode=send" >> "$GITHUB_OUTPUT"
-          else
-            echo "wrong side of daylight saving; the other cron handles today"
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          fi
+          dow=$(TZ="$TARGET_TZ" date +%u)        # 1 = Monday
+          yesterday=$(TZ="$TARGET_TZ" date -d "$today -1 day" +%F)
+          sent=$(tr -d '[:space:]' < state/last_sent 2>/dev/null || echo none)
+
+          echo "cron '${{ github.event.schedule }}' delivered at ${today} ${hour}:00 ${TARGET_TZ} (weekday ${dow})"
+          echo "last recorded send: ${sent}"
+
+          skip() { echo "$1"; echo "proceed=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          send() { echo "$1"; {
+            echo "proceed=true"; echo "mode=send";
+          } >> "$GITHUB_OUTPUT"; exit 0; }
+
+          # Already done today, by an earlier rung or by a manual send.
+          [ "$sent" = "$today" ] && skip "a digest already went out today; this rung is not needed"
+
+          case "$dow" in
+            1)
+              # Monday. Hold back only a rung that is early in the local day,
+              # because its daylight-saving sibling an hour later is the one
+              # meant to carry the 10:00 slot.
+              if [ "$hour" -lt "$TARGET_HOUR" ]; then
+                skip "only ${hour}:00 locally; the ${TARGET_HOUR}:00 rung will send"
+              fi
+              send "Monday and nothing sent yet -- sending"
+              ;;
+            2)
+              # Tuesday catch-up: only when Monday produced nothing at all.
+              if [ "$sent" = "$yesterday" ]; then
+                skip "Monday's digest went out on ${sent}; no catch-up needed"
+              fi
+              send "no digest went out on Monday (${yesterday}) -- catching up"
+              ;;
+            *)
+              skip "not Monday or Tuesday in ${TARGET_TZ}"
+              ;;
+          esac
 
   digest:
     needs: schedule-gate
@@ -113,7 +187,7 @@ jobs:
     # per-request timeout somehow misses.
     timeout-minutes: 45
     permissions:
-      contents: write   # to commit the digest and proposals back
+      contents: write   # to commit the digest, the marker and proposals back
       actions: read     # to download the previous run's database
 
     steps:
@@ -154,6 +228,11 @@ jobs:
 
       - name: Run the pipeline
         env:
+          # The runner's clock is UTC, and the pipeline names the digest after
+          # today's date. Without this, a late rung of the ladder -- 01:00 or
+          # 04:00 UTC is still Monday evening in Chicago -- would file Monday's
+          # digest under a Tuesday name.
+          TZ: ${{ env.TARGET_TZ }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
@@ -175,6 +254,27 @@ jobs:
             send)    python -m scout run --email-preview $since -v ;;
             resend)  python -m scout email --send -v ;;
           esac
+
+      - name: Record that the digest went out
+        # The marker that suppresses the rest of the day's ladder, so it is
+        # written only on a real `send` and only once the pipeline above has
+        # succeeded. `resend` deliberately does not land here.
+        #
+        # send_digest() returns False without raising when mail is not
+        # configured, so a `send` run can succeed having mailed nobody. Failing
+        # loudly here is better than recording a send that never happened and
+        # suppressing every remaining rung.
+        if: needs.schedule-gate.outputs.mode == 'send'
+        env:
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SMTP_TO:-}" ]; then
+            echo "::error::send mode ran with no SMTP_TO, so nothing was mailed; not recording a send"
+            exit 1
+          fi
+          TZ="$TARGET_TZ" date +%F > state/last_sent
+          echo "recorded send for $(cat state/last_sent)"
 
       - name: Save the paper database
         # NOT on `collect`. Ingest records every paper it fetches as "seen",
@@ -210,9 +310,15 @@ jobs:
       - name: Commit the digest and any self-applied changes
         # Only the small, reviewable text files. Rebase first: a manual run and
         # a hand-edited feedback.yaml can both land between scheduled runs.
+        #
+        # always() so that a send which mailed successfully still records its
+        # marker even if a later step failed -- otherwise the next rung would
+        # send the same digest again.
         if: >-
-          needs.schedule-gate.outputs.mode == 'preview' ||
-          needs.schedule-gate.outputs.mode == 'send'
+          always() && (
+            needs.schedule-gate.outputs.mode == 'preview' ||
+            needs.schedule-gate.outputs.mode == 'send'
+          )
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -223,5 +329,41 @@ jobs:
             exit 0
           fi
           git commit -m "digest: weekly run ${{ github.run_number }}"
-          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          # The marker is what stops a duplicate email, so a lost race here is
+          # worth retrying rather than shrugging off.
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" \
+              && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "push attempt ${attempt} failed; retrying"
+            sleep 5
+          done
+          echo "::error::could not push the digest and send marker"
+          exit 1
+
+  # The silence alarm. Without this, a failed pipeline, an expired SMTP app
+  # password or an exhausted API budget all look identical from the inbox:
+  # nothing arrives and nothing says why.
+  alarm:
+    needs: [schedule-gate, digest]
+    if: always() && github.event_name == 'schedule' && needs.digest.result == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Mail the failure
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: |
+          python scripts/alarm_email.py \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --cron "${{ github.event.schedule }}"

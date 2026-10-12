@@ -873,7 +873,7 @@ industries.yaml        the industry taxonomy: categories, keyword sets, groups, 
 .env                   secrets: ANTHROPIC_API_KEY, SMTP_* (gitignored)
 .env.example           the same keys with placeholders (committed)
 .githooks/pre-commit   blocks commits carrying a credential
-.github/workflows/     the Monday 10:00 schedule
+.github/workflows/     the Monday retry ladder + Tuesday catch-up
 .env.example           committed template
 prompts/               triage.md, final.md, verify.md -- loaded at runtime
 scout/
@@ -899,7 +899,7 @@ scout/
   mailer.py            Markdown -> HTML email, and SMTP delivery
   logging_setup.py     rotating file log + stderr
 eval/                  labels.csv, run_eval.py
-scripts/               run_weekly.sh, crontab.txt
+scripts/               run_weekly.sh, crontab.txt, alarm_email.py
 tests/
 data/scout.db          SQLite database (gitignored)
 digests/YYYY-MM-DD.md    the report
@@ -969,6 +969,12 @@ Under **Settings → Secrets and variables → Actions**:
 | `SMTP_FROM` | no | Defaults to `SMTP_USER`. |
 | `EMAIL_UNSUBSCRIBE` | no | URL or address for the opt-out. |
 
+`EMAIL_LIST_ID` is **not** a secret and lives in the workflow's `env:` block
+(`quantph-scout.wjenson312.github.io`). `scout/config.py` reads it to emit the
+RFC 2919 `List-Id` header; leaving it unset silently drops the header, which
+was the state of things until it was wired up — the deliverability fix that
+added the header had never actually shipped in CI.
+
 **The recipient list is a secret, not configuration** — those are other people's
 addresses. Everything non-sensitive (host, port, sender name, subject prefix)
 lives in the workflow file where it is readable.
@@ -976,15 +982,85 @@ lives in the workflow file where it is readable.
 No `.env` is needed. `load_dotenv(..., override=False)` means a real environment
 variable always wins and a missing `.env` is a no-op.
 
-### Two cron lines, on purpose
+### Seven cron lines, on purpose
 
-Cron on GitHub is UTC and ignores daylight saving, so one line would silently
-become 9am every November. The workflow fires **twice** — 15:00 UTC (10am CDT)
-and 16:00 UTC (10am CST) — and a gate job checks the real local time in
-`America/Chicago`, exiting unless it is 10am. Exactly one proceeds each week;
-the other exits in about three seconds and costs nothing.
+GitHub cron is best-effort. It fires late by 10–60+ minutes as a matter of
+course, and under load it drops firings entirely — no retry, no notification,
+no run in the Actions tab at all. One cron line a week therefore means one
+chance a week, and a dropped Monday is a seven-day gap.
 
-To change the time, edit `TARGET_TZ`/`TARGET_HOUR` **and both cron lines**.
+So the schedule is a **retry ladder**: six lines spread across Monday in
+`America/Chicago`, plus a Tuesday catch-up.
+
+| Cron (UTC) | CDT (summer) | CST (winter) | Role |
+|---|---|---|---|
+| `0 15 * * 1` | Mon 10:00 | Mon 09:00 | the target, summer |
+| `0 16 * * 1` | Mon 11:00 | Mon 10:00 | the target, winter |
+| `0 18 * * 1` | Mon 13:00 | Mon 12:00 | retry |
+| `0 21 * * 1` | Mon 16:00 | Mon 15:00 | retry |
+| `0 1  * * 2` | Mon 20:00 | Mon 19:00 | retry |
+| `0 4  * * 2` | Mon 23:00 | Mon 22:00 | retry |
+| `0 12 * * 2` | Tue 07:00 | Tue 06:00 | catch-up |
+
+The last two Monday rungs are Tuesday in UTC and still Monday in Chicago; that
+is the point of deciding in local time rather than UTC.
+
+`schedule-gate` lets exactly one rung through by asking two questions:
+
+1. Is it Monday in `$TARGET_TZ`?
+2. Does `state/last_sent` already hold today's local date?
+
+It does **not** compare the clock against the cron that fired. That is what
+makes a late delivery still send: under the old "exit unless it is exactly
+10am" gate, a run delivered at 11:05 concluded it was the wrong side of
+daylight saving and exited green, producing a silent week. It is also why no
+DST arithmetic appears anywhere any more — local date and local weekday are
+already correct in both halves of the year, so the two-cron dance that existed
+only to hit 10:00 exactly is gone.
+
+`TARGET_HOUR` survives as a *soft* preference: a Monday rung that lands before
+10:00 local stands down, which in practice is only the 15:00 UTC rung in
+winter, covered by 16:00 UTC an hour later. Later rungs never check the hour,
+so this cannot cause a silent week.
+
+The **Tuesday catch-up** fires only when `state/last_sent` is not Monday's
+date — i.e. when every Monday rung failed or was dropped. A bad Monday then
+costs you a late digest rather than a missing one.
+
+To change the time, edit `TARGET_TZ`/`TARGET_HOUR` and the two target cron
+lines. The retry rungs only need to stay inside Monday-local.
+
+### The send marker, and why a duplicate is the better failure
+
+`state/last_sent` holds one line: the local date of the last real send. It is
+written only after a successful `send` (never by `preview`, and deliberately
+never by `resend`, so a deliverability test on a Monday cannot suppress that
+day's real digest), and it is committed and pushed with the digest.
+
+Two consequences worth being explicit about:
+
+- Workflow-level `concurrency` serialises the ladder, so a queued rung's gate
+  does not run until the rung in front of it has finished and pushed. Two rungs
+  cannot both decide to send.
+- If the email goes out but the marker fails to push, a later rung sends a
+  **duplicate**. The push retries three times, but with retries you must choose
+  which way to fail, and a rare duplicate beats a silent week. If you would
+  rather have the opposite trade, drop the retry rungs.
+
+`send_digest()` returns `False` without raising when mail is unconfigured, so a
+`send` run can otherwise succeed having mailed nobody. The marker step fails
+loudly on an empty `SMTP_TO` rather than recording a send that never happened.
+
+### The silence alarm
+
+Every interesting failure — pipeline crash, revoked Gmail app password,
+exhausted API budget, GitHub outage mid-run — looks identical from the inbox:
+nothing arrives. A red run in a tab nobody opens is not a notification.
+
+So a scheduled run that fails mails `scripts/alarm_email.py`: plain text, no
+model calls, no digest rendering, naming the cron that fired, the run URL, what
+the ladder will try next, and the `gh workflow run` line to send by hand. It
+shares `load_config()` with the pipeline so the SMTP settings cannot drift.
 
 ### How state survives an ephemeral runner
 
@@ -995,7 +1071,8 @@ Split by kind, because the two halves have opposite requirements:
   model-call logs growing ~5MB a week; committing it weekly would put a quarter
   of a gigabyte of binary into git history within a year. Without it the dedupe
   table starts empty and the run re-features papers that already went out.
-- **The digest, `state/proposals.yaml` and `pipelines.yaml` are committed back**,
+- **The digest, `state/last_sent`, `state/proposals.yaml` and `pipelines.yaml` are
+  committed back**,
   because those are small, text, and meant to be read in the repo. That commit
   also resets GitHub's 60-day inactivity timer, which would otherwise disable
   this schedule after two quiet months.
