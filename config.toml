@@ -45,13 +45,18 @@ backoff_seconds = 60.0
 max_failure_rate = 0.5
 
 [models]
-# Stage A and Stage B run over the whole corpus, so both are cheap-tier.
+# The three batched stages, in the order pipeline.py runs them: tag over every
+# surviving paper, then match, then readiness over what matching kept. Tagging
+# is the only one that sees the whole corpus, but all three are per-paper work
+# at corpus scale, so all three are cheap-tier.
 tag = "claude-haiku-4-5-20251001"
-readiness = "claude-haiku-4-5-20251001"
-# Industry matching now sees only the ~20-paper readiness shortlist, so it could
-# afford a stronger model. Kept cheap because the pipeline tag has already
-# narrowed the industry candidates to a handful.
+# Industry matching sees the tagged corpus, not a shortlist. The pipeline tag
+# has already narrowed the industry candidates to a handful, which is what keeps
+# this affordable at full volume -- it is still the stage with the most calls.
 match = "claude-haiku-4-5-20251001"
+# Readiness runs last of the three, over matched papers only, and produces the
+# shortlist that the Sonnet pass below reads.
+readiness = "claude-haiku-4-5-20251001"
 # The final pass reads abstracts only, not full text, which is the single
 # biggest saving in v2 over v1.
 final = "claude-sonnet-5"
@@ -127,13 +132,21 @@ max_tokens = 3072
 papers_per_request = 15
 concurrency = 4
 max_tokens = 8192
-# How many papers reach industry matching.
+# How many papers reach the FINAL pass -- i.e. how many Sonnet reads. This is a
+# cost lever on the expensive stage, not a filter feeding one of the cheap ones:
+# readiness runs after matching, so nothing downstream of it is Haiku work.
+# `[final] max_papers` caps the same list again, lower down.
 shortlist_size = 20
 
 # ---------------------------------------------------------------------------
-# Industry matching (was `triage` before the pipeline layer). Runs on the
-# readiness shortlist only, so it answers "which industry" rather than acting as
-# the volume filter.
+# Industry matching (was `triage` before the pipeline layer). Runs on the TAGGED
+# CORPUS, before readiness scoring -- it is the stage that decides whether a
+# paper is reportable at all, by dropping anything below `min_relevance`.
+#
+# The order matters and is not the addendum's: scoring readiness first and
+# passing its top 20 to matching produced an empty report, because readiness
+# rewards work with no physical barriers, which means software. See the
+# pipeline.py docstring for the measured numbers.
 # ---------------------------------------------------------------------------
 [match]
 papers_per_request = 20

@@ -40,12 +40,14 @@ class ArxivConfig:
 
 @dataclass(frozen=True)
 class ModelsConfig:
-    # Stage A and Stage B run over the whole corpus, so both are cheap-tier.
+    # The three batched stages, in the order pipeline.py runs them: tag, match,
+    # readiness. Only tagging sees the whole corpus, but all three are per-paper
+    # work at corpus scale, so all three are cheap-tier.
     tag: str = "claude-haiku-4-5-20251001"
-    readiness: str = "claude-haiku-4-5-20251001"
-    # Industry matching now sees only the readiness shortlist (~20 papers), so it
-    # could afford a stronger model; kept cheap because the choice is narrow.
+    # Matching sees the tagged corpus, not a shortlist; the pipeline tag has
+    # already narrowed the industry candidates, which is what keeps it cheap.
     match: str = "claude-haiku-4-5-20251001"
+    readiness: str = "claude-haiku-4-5-20251001"
     final: str = "claude-sonnet-5"
     verify: str = "claude-sonnet-5"
 
@@ -67,7 +69,9 @@ class ReadinessConfig:
     concurrency: int = 4
     # Five checks x (score + note) per paper needs real headroom.
     max_tokens: int = 8192
-    # How many papers reach industry matching. The brief says 20.
+    # How many papers reach the FINAL (Sonnet) pass. The brief says 20. Readiness
+    # runs after matching, so this is a cost lever on the expensive stage rather
+    # than a filter feeding a cheap one.
     shortlist_size: int = 20
 
 
