@@ -1144,10 +1144,19 @@ Two `collect` runs did this during setup: they ingested 2,224 papers to prove
 the artifact round-trip worked, and the next real run correctly found zero new
 papers and emailed an empty digest.
 
-Two guards now exist:
+Three guards now exist:
 
 - **`collect` does not upload its database.** The free connectivity check is
   side-effect free, so it can be run as often as you like.
+- **A failed run cannot poison the next one.** The upload runs under
+  `always()`, so a run that dies mid-pipeline still saves its database — and by
+  then ingest has already marked the whole window as seen. What contains it is
+  the restore step, which asks `gh run list --status=success`: a database
+  uploaded by a *failed* run is never restored. This earned its keep on
+  2026-11-02, when an expired `ANTHROPIC_API_KEY` made two rungs 401 at the
+  first model call. Both uploaded a `scout-db` artifact holding a
+  fully-ingested, never-screened window; neither is eligible for restore, so
+  the next rung starts from the previous Monday's database instead.
 - **`seed` exists for when you actually want this.** It ingests a window and
   keeps the database *without* screening it — the right tool when history lives
   somewhere else and you need this database to know about it. It is free, and it
@@ -1163,6 +1172,14 @@ the first scheduled run's 14-day fetch window and would have been sent twice.
 # "Everything up to this date has already been judged elsewhere."
 gh workflow run "Weekly Digest" -f mode=seed -f since=2026-09-20
 ```
+
+Note the asymmetry in that second guard: it only covers runs that *fail*. A
+manual `dry-run` that succeeds **is** restored, and it marks the window as seen
+while producing no digest — so a `dry-run` fired on a Monday before the digest
+has gone out leaves the next rung with zero new papers and an empty email. Do
+not use it to test a rotated key. `collect` is side-effect free at any time but
+makes no model calls, so it proves nothing about the key; the scheduled `send`
+is the only thing that really tests one.
 
 ### The fetch window is 14 days, and there is no separate report window
 
