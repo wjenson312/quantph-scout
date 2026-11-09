@@ -34,9 +34,9 @@ proposals:
   - '2610.10268'
   - '2610.10165'
   first_seen: '2026-10-02'
-  occurrences: 6
+  occurrences: 7
   status: pending
-  note: '301 shortlisted paper(s) were dropped rather than forced into a weak industry fit.
+  note: '314 shortlisted paper(s) were dropped rather than forced into a weak industry fit.
     Pipelines involved: unknown'
 - id: signal-design-tools
   type: new_discovery_signal
